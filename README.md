@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Medicine Backend API
 
 Dự án Backend API cho hệ thống quản lý thuốc.
@@ -77,6 +76,3 @@ npm run dev        # Chạy development với nodemon
 npm run lint       # Chạy ESLint
 npm run format     # Format code với Prettier
 ```
-=======
-"# Pharmacy-Inventory-System-BE" 
->>>>>>> parent of 4b07fc5 (feat: user login)
