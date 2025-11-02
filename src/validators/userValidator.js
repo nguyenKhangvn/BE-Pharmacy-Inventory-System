@@ -25,8 +25,8 @@ export const validateCreateUser = [
     ),
 
   body("role")
-    .isIn(["ADMIN", "MANAGER", "PHARMACIST"])
-    .withMessage("Role must be one of: ADMIN, MANAGER, PHARMACIST"),
+    .isIn(["admin"])
+    .withMessage("Role must be one of: admin"),
 ];
 
 export const validateUpdateUser = [
@@ -40,8 +40,8 @@ export const validateUpdateUser = [
 
   body("role")
     .optional()
-    .isIn(["ADMIN", "MANAGER", "PHARMACIST"])
-    .withMessage("Role must be one of: ADMIN, MANAGER, PHARMACIST"),
+    .isIn(["admin"])
+    .withMessage("Role must be one of: admin"),
 
   body("isActive")
     .optional()

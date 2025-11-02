@@ -17,7 +17,7 @@ const SupplierSchema = new mongoose.Schema(
     email: { type: String },
     address: { type: String },
     taxCode: { type: String, index: { unique: true, sparse: true } },
-    status: { type: String, enum: SupplierStatus, default: "ACTIVE" },
+    status: { type: String, enum: SupplierStatus, default: "active" },
   },
   { timestamps: true, versionKey: false }
 );
