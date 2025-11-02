@@ -234,6 +234,103 @@ class UserController {
       return ApiResponse.error(res, "Server error", 500);
     }
   }
+  
+  // @desc    Update user info (and/or status/role, optional reset password)
+  // @route   PUT /api/users/:id
+  // @access  Private (admin)
+  static async updateUser(req, res) {
+    try {
+      const { id } = req.params;
+
+      // Validate ObjectId format
+      if (!id || !id.match(/^[0-9a-fA-F]{24}$/)) {
+        return ApiResponse.error(res, "ID người dùng không hợp lệ", 400);
+      }
+
+      // Lấy user cần cập nhật
+      const user = await User.findById(id);
+      if (!user) {
+        return ApiResponse.error(res, "Không tìm thấy người dùng", 404);
+      }
+
+      // Lấy dữ liệu đầu vào (tất cả đều tùy chọn)
+      const {
+        username,
+        fullName,
+        email,
+        phone,
+        role,
+        status,
+      } = req.body || {};
+
+      // Chuẩn hoá input
+      const next = {};
+      if (typeof username === "string") next.username = username.trim().toLowerCase();
+      if (typeof email === "string")    next.email    = email.trim().toLowerCase();
+      if (typeof fullName === "string") next.fullName = fullName.trim();
+      if (typeof phone === "string")    next.phone    = phone.trim();
+
+      // Validate email format nếu có cập nhật
+      if (next.email !== undefined) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(next.email)) {
+          return ApiResponse.error(res, "Email không đúng định dạng", 400);
+        }
+      }
+
+      // Kiểm tra trùng username/email (bỏ qua chính user hiện tại)
+      if (next.username) {
+        const dupUser = await User.findOne({ username: next.username, _id: { $ne: id } }).lean();
+        if (dupUser) return ApiResponse.error(res, "Tên đăng nhập đã tồn tại", 409);
+      }
+      if (next.email) {
+        const dupEmail = await User.findOne({ email: next.email, _id: { $ne: id } }).lean();
+        if (dupEmail) return ApiResponse.error(res, "Email đã tồn tại", 409);
+      }
+
+      // Validate & gán role/status nếu có cập nhật
+      if (role !== undefined) {
+        if (!ALLOWED_ROLES.includes(role)) {
+          return ApiResponse.error(res, "Giá trị role không hợp lệ", 400);
+        }
+        next.role = role;
+      }
+      if (status !== undefined) {
+        if (!ALLOWED_STATUS.includes(status)) {
+          return ApiResponse.error(res, "Giá trị status không hợp lệ", 400);
+        }
+        next.status = status;
+      }
+
+      // Gán các trường khác
+      if (next.username !== undefined) user.username = next.username;
+      if (next.fullName !== undefined) user.fullName = next.fullName;
+      if (next.email !== undefined)    user.email    = next.email;
+      if (next.phone !== undefined)    user.phone    = next.phone;
+      if (next.role !== undefined)     user.role     = next.role;
+      if (next.status !== undefined)   user.status   = next.status;
+
+      await user.save(); // đảm bảo trigger validate & pre-save hooks
+
+      const dto = {
+        id: String(user._id),
+        username: user.username,
+        fullName: user.fullName || "",
+        email: user.email,
+        phone: user.phone || "",
+        role: user.role,
+        status: user.status,
+        lastLogin: user.lastLogin || null,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+      };
+
+      return ApiResponse.success(res, dto, "Cập nhật thông tin thành công");
+    } catch (error) {
+      console.error("Update user error:", error);
+      return ApiResponse.error(res, "Server error", 500);
+    }
+  }
 }
 
 export default UserController;

@@ -33,6 +33,12 @@ const mockReq = (query = {}, user = null) => ({
   user
 });
 
+const mockReqUpdate = (id, body = {}, user = { id: 'admin-id', role: 'admin' }) => ({
+  params: { id },
+  body,
+  user
+});
+
 describe('userController.getUsers', () => {
   let findMock;
   
@@ -1598,6 +1604,467 @@ describe('userController.getUserById', () => {
       expect(payload.data).toHaveProperty('lastLogin');
       expect(payload.data).toHaveProperty('createdAt');
       expect(payload.data).toHaveProperty('updatedAt');
+    });
+  });
+});
+
+// Update user test
+describe('userController.updateUser', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  const makeDoc = (overrides = {}) => ({
+    _id: '507f1f77bcf86cd799439011',
+    username: 'olduser',
+    email: 'old@example.com',
+    fullName: 'Old Name',
+    phone: '000',
+    role: 'user',
+    status: 'active',
+    lastLogin: null,
+    createdAt: new Date('2024-01-01T00:00:00Z'),
+    updatedAt: new Date('2024-01-01T00:00:00Z'),
+    save: jest.fn().mockImplementation(function() {
+      // Update timestamps when save is called
+      this.updatedAt = new Date();
+      return Promise.resolve(this);
+    }),
+    ...overrides
+  });
+
+  describe('AC: Validation - ID và User tồn tại', () => {
+    it('should return 400 for invalid ObjectId format', async () => {
+      const req = mockReqUpdate('invalid-id', {});
+      const res = mockRes();
+
+      await UserController.updateUser(req, res);
+      
+      expect(res.status).toHaveBeenCalledWith(400);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+      expect(payload.message).toBe('ID người dùng không hợp lệ');
+    });
+
+    it('should return 400 for empty ID', async () => {
+      const req = mockReqUpdate('', {});
+      const res = mockRes();
+
+      await UserController.updateUser(req, res);
+      
+      expect(res.status).toHaveBeenCalledWith(400);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+      expect(payload.message).toBe('ID người dùng không hợp lệ');
+    });
+
+    it('should return 404 when user does not exist', async () => {
+      mockFindById.mockResolvedValue(null);
+
+      const req = mockReqUpdate('507f1f77bcf86cd799439099', {});
+      const res = mockRes();
+
+      await UserController.updateUser(req, res);
+      
+      expect(mockFindById).toHaveBeenCalledWith('507f1f77bcf86cd799439099');
+      expect(res.status).toHaveBeenCalledWith(404);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+      expect(payload.message).toBe('Không tìm thấy người dùng');
+    });
+  });
+
+  describe('AC: Email validation', () => {
+    it('should return 400 for invalid email format', async () => {
+      const doc = makeDoc();
+      mockFindById.mockResolvedValue(doc);
+
+      const req = mockReqUpdate(doc._id, { email: 'invalid-email' });
+      const res = mockRes();
+
+      await UserController.updateUser(req, res);
+      
+      expect(res.status).toHaveBeenCalledWith(400);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+      expect(payload.message).toMatch(/Email không đúng định dạng/i);
+      expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('should return 409 when email already exists for another user', async () => {
+      const doc = makeDoc();
+      mockFindById.mockResolvedValue(doc);
+
+      // Mock username check - no duplicate
+      const leanFn = jest.fn()
+        .mockResolvedValueOnce(null)                          // username ok
+        .mockResolvedValueOnce({ _id: 'another-user-id' });   // email duplicate
+      
+      mockFindOne.mockReturnValue({ lean: leanFn });
+
+      const req = mockReqUpdate(doc._id, { 
+        username: 'olduser', 
+        email: 'duplicate@example.com' 
+      });
+      const res = mockRes();
+
+      await UserController.updateUser(req, res);
+
+      expect(mockFindOne).toHaveBeenCalledTimes(2);
+      
+      // Verify email query has $ne condition
+      const emailQuery = mockFindOne.mock.calls[1][0];
+      expect(emailQuery).toMatchObject({ 
+        email: 'duplicate@example.com', 
+        _id: { $ne: doc._id } 
+      });
+
+      expect(res.status).toHaveBeenCalledWith(409);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+      expect(payload.message).toMatch(/Email đã tồn tại/i);
+      expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('should allow same email for the same user', async () => {
+      const doc = makeDoc();
+      mockFindById.mockResolvedValue(doc);
+
+      // Mock check returns the same user
+      const leanFn = jest.fn()
+        .mockResolvedValueOnce(null)  // username check
+        .mockResolvedValueOnce({ _id: doc._id }); // email check returns same user
+      
+      mockFindOne.mockReturnValue({ lean: leanFn });
+
+      const req = mockReqUpdate(doc._id, { 
+        email: doc.email, // same email
+        fullName: 'Updated Name'
+      });
+      const res = mockRes();
+
+      await UserController.updateUser(req, res);
+
+      expect(doc.save).toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+  });
+
+  describe('AC: Username validation', () => {
+    it('should return 409 when username already exists for another user', async () => {
+      const doc = makeDoc();
+      mockFindById.mockResolvedValue(doc);
+
+      // Mock username check - duplicate found
+      const leanFn = jest.fn().mockResolvedValue({ _id: 'another-user-id' });
+      mockFindOne.mockReturnValue({ lean: leanFn });
+
+      const req = mockReqUpdate(doc._id, { username: 'NewUser' });
+      const res = mockRes();
+
+      await UserController.updateUser(req, res);
+
+      // Verify query has $ne condition
+      const usernameQuery = mockFindOne.mock.calls[0][0];
+      expect(usernameQuery).toMatchObject({ 
+        username: 'newuser', // normalized
+        _id: { $ne: doc._id } 
+      });
+
+      expect(res.status).toHaveBeenCalledWith(409);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+      expect(payload.message).toMatch(/Tên đăng nhập đã tồn tại/i);
+      expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('should normalize username to lowercase', async () => {
+      const doc = makeDoc();
+      mockFindById.mockResolvedValue(doc);
+
+      const leanFn = jest.fn().mockResolvedValue(null);
+      mockFindOne.mockReturnValue({ lean: leanFn });
+
+      const req = mockReqUpdate(doc._id, { username: '  NewUser  ' });
+      const res = mockRes();
+
+      await UserController.updateUser(req, res);
+
+      expect(doc.username).toBe('newuser');
+      expect(mockFindOne).toHaveBeenCalledWith(
+        expect.objectContaining({ username: 'newuser' })
+      );
+    });
+  });
+
+  describe('AC: Role và Status validation', () => {
+    it('should return 400 for invalid role', async () => {
+      const doc = makeDoc();
+      mockFindById.mockResolvedValue(doc);
+
+      const req = mockReqUpdate(doc._id, { role: 'superadmin' });
+      const res = mockRes();
+
+      await UserController.updateUser(req, res);
+      
+      expect(res.status).toHaveBeenCalledWith(400);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+      expect(payload.message).toMatch(/role không hợp lệ/i);
+      expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('should accept valid role "admin"', async () => {
+      const doc = makeDoc();
+      mockFindById.mockResolvedValue(doc);
+
+      const leanFn = jest.fn().mockResolvedValue(null);
+      mockFindOne.mockReturnValue({ lean: leanFn });
+
+      const req = mockReqUpdate(doc._id, { role: 'admin' });
+      const res = mockRes();
+
+      await UserController.updateUser(req, res);
+
+      expect(doc.role).toBe('admin');
+      expect(doc.save).toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    it('should accept valid role "user"', async () => {
+      const doc = makeDoc();
+      mockFindById.mockResolvedValue(doc);
+
+      const leanFn = jest.fn().mockResolvedValue(null);
+      mockFindOne.mockReturnValue({ lean: leanFn });
+
+      const req = mockReqUpdate(doc._id, { role: 'user' });
+      const res = mockRes();
+
+      await UserController.updateUser(req, res);
+
+      expect(doc.role).toBe('user');
+      expect(doc.save).toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    it('should return 400 for invalid status', async () => {
+      const doc = makeDoc();
+      mockFindById.mockResolvedValue(doc);
+
+      const req = mockReqUpdate(doc._id, { status: 'suspended' });
+      const res = mockRes();
+
+      await UserController.updateUser(req, res);
+      
+      expect(res.status).toHaveBeenCalledWith(400);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+      expect(payload.message).toMatch(/status không hợp lệ/i);
+      expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('should accept valid status "active"', async () => {
+      const doc = makeDoc({ status: 'locked' });
+      mockFindById.mockResolvedValue(doc);
+
+      const leanFn = jest.fn().mockResolvedValue(null);
+      mockFindOne.mockReturnValue({ lean: leanFn });
+
+      const req = mockReqUpdate(doc._id, { status: 'active' });
+      const res = mockRes();
+
+      await UserController.updateUser(req, res);
+
+      expect(doc.status).toBe('active');
+      expect(doc.save).toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    it('should accept valid status "locked"', async () => {
+      const doc = makeDoc({ status: 'active' });
+      mockFindById.mockResolvedValue(doc);
+
+      const leanFn = jest.fn().mockResolvedValue(null);
+      mockFindOne.mockReturnValue({ lean: leanFn });
+
+      const req = mockReqUpdate(doc._id, { status: 'locked' });
+      const res = mockRes();
+
+      await UserController.updateUser(req, res);
+
+      expect(doc.status).toBe('locked');
+      expect(doc.save).toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+  });
+
+  describe('AC: Successful update scenarios', () => {
+    it('should update all user information successfully', async () => {
+      const doc = makeDoc();
+      mockFindById.mockResolvedValue(doc);
+
+      // No duplicates
+      const leanFn = jest.fn().mockResolvedValue(null);
+      mockFindOne.mockReturnValue({ lean: leanFn });
+
+      const body = {
+        username: '  NewUser  ',
+        email: '  NEW@EXAMPLE.COM  ',
+        fullName: '  New Full Name  ',
+        phone: '  0123456789  ',
+        role: 'admin',
+        status: 'locked'
+      };
+      const req = mockReqUpdate(doc._id, body);
+      const res = mockRes();
+
+      await UserController.updateUser(req, res);
+
+      // Verify normalization
+      expect(doc.username).toBe('newuser');
+      expect(doc.email).toBe('new@example.com');
+      expect(doc.fullName).toBe('New Full Name');
+      expect(doc.phone).toBe('0123456789');
+      expect(doc.role).toBe('admin');
+      expect(doc.status).toBe('locked');
+
+      expect(doc.save).toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(200);
+
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(true);
+      expect(payload.message).toBe('Cập nhật thông tin thành công');
+      expect(payload.data).toMatchObject({
+        id: doc._id,
+        username: 'newuser',
+        email: 'new@example.com',
+        fullName: 'New Full Name',
+        phone: '0123456789',
+        role: 'admin',
+        status: 'locked'
+      });
+      expect(payload.data).not.toHaveProperty('password');
+    });
+
+    it('should update only specific fields provided', async () => {
+      const doc = makeDoc();
+      mockFindById.mockResolvedValue(doc);
+
+      const leanFn = jest.fn().mockResolvedValue(null);
+      mockFindOne.mockReturnValue({ lean: leanFn });
+
+      const req = mockReqUpdate(doc._id, { 
+        fullName: 'Only Name Changed' 
+      });
+      const res = mockRes();
+
+      await UserController.updateUser(req, res);
+
+      expect(doc.fullName).toBe('Only Name Changed');
+      expect(doc.username).toBe('olduser'); // unchanged
+      expect(doc.email).toBe('old@example.com'); // unchanged
+      expect(doc.save).toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    it('should handle empty optional fields', async () => {
+      const doc = makeDoc();
+      mockFindById.mockResolvedValue(doc);
+
+      const leanFn = jest.fn().mockResolvedValue(null);
+      mockFindOne.mockReturnValue({ lean: leanFn });
+
+      const req = mockReqUpdate(doc._id, {
+        fullName: '',
+        phone: ''
+      });
+      const res = mockRes();
+
+      await UserController.updateUser(req, res);
+
+      expect(doc.fullName).toBe('');
+      expect(doc.phone).toBe('');
+      expect(doc.save).toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+  });
+
+  describe('AC: Response format', () => {
+    it('should return correct response structure', async () => {
+      const doc = makeDoc();
+      mockFindById.mockResolvedValue(doc);
+
+      const leanFn = jest.fn().mockResolvedValue(null);
+      mockFindOne.mockReturnValue({ lean: leanFn });
+
+      const req = mockReqUpdate(doc._id, { fullName: 'Updated' });
+      const res = mockRes();
+
+      await UserController.updateUser(req, res);
+
+      const payload = res.json.mock.calls[0][0];
+      
+      expect(payload).toHaveProperty('success', true);
+      expect(payload).toHaveProperty('message');
+      expect(payload).toHaveProperty('data');
+      
+      expect(payload.data).toHaveProperty('id');
+      expect(payload.data).toHaveProperty('username');
+      expect(payload.data).toHaveProperty('fullName');
+      expect(payload.data).toHaveProperty('email');
+      expect(payload.data).toHaveProperty('phone');
+      expect(payload.data).toHaveProperty('role');
+      expect(payload.data).toHaveProperty('status');
+      expect(payload.data).toHaveProperty('lastLogin');
+      
+      expect(payload.data).not.toHaveProperty('password');
+      expect(payload.data).not.toHaveProperty('_id');
+    });
+  });
+
+  describe('Error handling', () => {
+    it('should return 500 on database error', async () => {
+      const dbError = new Error('Database connection failed');
+      mockFindById.mockRejectedValue(dbError);
+
+      const req = mockReqUpdate('507f1f77bcf86cd799439011', { fullName: 'Test' });
+      const res = mockRes();
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+
+      await UserController.updateUser(req, res);
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Update user error:', dbError);
+      expect(res.status).toHaveBeenCalledWith(500);
+      
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+      expect(payload.message).toBe('Server error');
+
+      consoleErrorSpy.mockRestore();
+    });
+
+    it('should return 500 when save fails', async () => {
+      const doc = makeDoc();
+      const saveError = new Error('Save failed');
+      doc.save.mockRejectedValue(saveError);
+      
+      mockFindById.mockResolvedValue(doc);
+
+      const leanFn = jest.fn().mockResolvedValue(null);
+      mockFindOne.mockReturnValue({ lean: leanFn });
+
+      const req = mockReqUpdate(doc._id, { fullName: 'Test' });
+      const res = mockRes();
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+
+      await UserController.updateUser(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+
+      consoleErrorSpy.mockRestore();
     });
   });
 });
