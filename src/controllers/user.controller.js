@@ -234,7 +234,7 @@ class UserController {
       return ApiResponse.error(res, "Server error", 500);
     }
   }
-
+  
   // @desc    Update user info (and/or status/role, optional reset password)
   // @route   PUT /api/users/:id
   // @access  Private (admin)
@@ -266,9 +266,9 @@ class UserController {
       // Chuẩn hoá input
       const next = {};
       if (typeof username === "string") next.username = username.trim().toLowerCase();
-      if (typeof email === "string") next.email = email.trim().toLowerCase();
+      if (typeof email === "string")    next.email    = email.trim().toLowerCase();
       if (typeof fullName === "string") next.fullName = fullName.trim();
-      if (typeof phone === "string") next.phone = phone.trim();
+      if (typeof phone === "string")    next.phone    = phone.trim();
 
       // Validate email format nếu có cập nhật
       if (next.email !== undefined) {
@@ -305,10 +305,10 @@ class UserController {
       // Gán các trường khác
       if (next.username !== undefined) user.username = next.username;
       if (next.fullName !== undefined) user.fullName = next.fullName;
-      if (next.email !== undefined) user.email = next.email;
-      if (next.phone !== undefined) user.phone = next.phone;
-      if (next.role !== undefined) user.role = next.role;
-      if (next.status !== undefined) user.status = next.status;
+      if (next.email !== undefined)    user.email    = next.email;
+      if (next.phone !== undefined)    user.phone    = next.phone;
+      if (next.role !== undefined)     user.role     = next.role;
+      if (next.status !== undefined)   user.status   = next.status;
 
       await user.save(); // đảm bảo trigger validate & pre-save hooks
 
@@ -328,69 +328,6 @@ class UserController {
       return ApiResponse.success(res, dto, "Cập nhật thông tin thành công");
     } catch (error) {
       console.error("Update user error:", error);
-      return ApiResponse.error(res, "Server error", 500);
-    }
-  }
-
-  // @desc    Update user status only
-  static async updateUserStatus(req, res) {
-    try {
-      const { id } = req.params;
-      const { status } = req.body || {};
-
-      // Validate id
-      if (!id || !id.match(/^[0-9a-fA-F]{24}$/)) {
-        return ApiResponse.error(res, "ID người dùng không hợp lệ", 400);
-      }
-
-      // Validate body.status
-      if (typeof status !== "string" || !ALLOWED_STATUS.includes(status)) {
-        return ApiResponse.error(res, `Giá trị status không hợp lệ (chỉ cho phép: ${ALLOWED_STATUS.join(", ")})`, 400);
-      }
-
-      // Tìm user
-      const user = await User.findById(id);
-      if (!user) {
-        return ApiResponse.error(res, "Không tìm thấy người dùng", 404);
-      }
-
-      // Idempotent: nếu không thay đổi thì trả về OK luôn
-      if (user.status === status) {
-        const dto = {
-          id: String(user._id),
-          username: user.username,
-          fullName: user.fullName || "",
-          email: user.email,
-          phone: user.phone || "",
-          role: user.role,
-          status: user.status,
-          lastLogin: user.lastLogin || null,
-          createdAt: user.createdAt,
-          updatedAt: user.updatedAt
-        };
-        return ApiResponse.success(res, dto, "Trạng thái không thay đổi");
-      }
-
-      // Cập nhật
-      user.status = status;
-      await user.save();
-
-      const dto = {
-        id: String(user._id),
-        username: user.username,
-        fullName: user.fullName || "",
-        email: user.email,
-        phone: user.phone || "",
-        role: user.role,
-        status: user.status,
-        lastLogin: user.lastLogin || null,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt
-      };
-
-      return ApiResponse.success(res, dto, "Cập nhật trạng thái thành công");
-    } catch (error) {
-      console.error("Update user status error:", error);
       return ApiResponse.error(res, "Server error", 500);
     }
   }
