@@ -188,52 +188,6 @@ class UserController {
         : res.status(500).json({ success: false, message: "Server error" });
     }
   }
-
-  // @desc    Get user by ID
-  // @route   GET /api/users/:id
-  // @access  Private
-  static async getUserById(req, res) {
-    try {
-      const { id } = req.params;
-
-      // Validate ObjectId format
-      if (!id || !id.match(/^[0-9a-fA-F]{24}$/)) {
-        return ApiResponse.error(res, "ID người dùng không hợp lệ", 400);
-      }
-
-      // Tìm user theo ID, không lấy password
-      const user = await User.findById(id)
-        .select("-password")
-        .lean();
-
-      if (!user) {
-        return ApiResponse.error(res, "Không tìm thấy người dùng", 404);
-      }
-
-      // Chuẩn hoá output theo format chung
-      const data = {
-        id: String(user._id),
-        username: user.username,
-        fullName: user.fullName || "",
-        email: user.email,
-        phone: user.phone || "",
-        role: user.role,
-        status: user.status,
-        lastLogin: user.lastLogin || null,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt,
-      };
-
-      return ApiResponse.success(
-        res,
-        data,
-        "Lấy thông tin người dùng thành công"
-      );
-    } catch (error) {
-      console.error("Get user by ID error:", error);
-      return ApiResponse.error(res, "Server error", 500);
-    }
-  }
 }
 
 export default UserController;
