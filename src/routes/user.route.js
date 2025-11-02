@@ -10,4 +10,9 @@ const router = express.Router();
 // @access  Private (admin only)
 router.get("/", auth, roleAuth(["admin"]), UserController.getUsers);
 
+// @route   POST /api/users
+// @desc    Create new user
+// @access  Private (admin only)
+router.post("/", auth, roleAuth(["admin"]), UserController.createUser);
+
 export default router;

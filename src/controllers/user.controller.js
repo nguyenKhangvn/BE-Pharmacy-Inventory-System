@@ -1,6 +1,9 @@
 import User from "../models/user.model.js";
 import ApiResponse from "../utils/ApiResponse.js";
 
+const ALLOWED_ROLES = ["admin", "user"];
+const ALLOWED_STATUS = ["active", "locked"];
+
 class UserController {
   // @desc    Get all users
   // @route   GET /api/users
@@ -90,6 +93,99 @@ class UserController {
     } catch (error) {
       console.error("Get users error:", error);
       return ApiResponse.error(res, "Server error", 500);
+    }
+  }
+
+  // @desc    Create new user
+  // @route   POST /api/users
+  // @access  Private (admin)
+  static async createUser(req, res) {
+    try {
+      const {
+        username,
+        fullName,
+        email,
+        phone,
+        password,
+        confirmPassword,
+        role = "admin",
+        status = "active",
+      } = req.body || {};
+
+      // --- Validate bắt buộc ---
+      if (!username || !email || !password || !confirmPassword) {
+        return ApiResponse.error(res, "username, email, password, confirmPassword là bắt buộc", 400);
+      }
+      if (password.length < 6) {
+        return ApiResponse.error(res, "Password phải ít nhất 6 ký tự", 400);
+      }
+      if (password !== confirmPassword) {
+        return ApiResponse.error(res, "Xác nhận mật khẩu không khớp", 400);
+      }
+
+      // --- Chuẩn hoá TRƯỚC KHI validate format ---
+      const usernameLc = (username || "").trim().toLowerCase();
+      const emailLc = (email || "").trim().toLowerCase();
+
+      // Validate email format AFTER trimming
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(emailLc)) {
+        return ApiResponse.error(res, "Email không đúng định dạng", 400);
+      }
+
+      // --- Kiểm tra trùng ---
+      const [dupUser, dupEmail] = await Promise.all([
+        User.findOne({ username: usernameLc }).lean(),
+        User.findOne({ email: emailLc }).lean(),
+      ]);
+      if (dupUser) {
+        return ApiResponse.error(res, "Tên đăng nhập đã tồn tại", 409);
+      }
+      if (dupEmail) {
+        return ApiResponse.error(res, "Email đã tồn tại", 409);
+      }
+
+      // --- Chuẩn hoá role/status ---
+      const normalizedRole = ALLOWED_ROLES.includes(role) ? role : "user";
+      const normalizedStatus = ALLOWED_STATUS.includes(status) ? status : "active";
+
+      // --- Tạo user ---
+      const created = await User.create({
+        username: usernameLc,
+        fullName: (fullName || "").trim(),
+        email: emailLc,
+        phone: (phone || "").trim(),
+        password,             // pre-save sẽ hash
+        role: normalizedRole,
+        status: normalizedStatus
+      });
+
+      const dto = {
+        id: String(created._id),
+        username: created.username,
+        fullName: created.fullName || "",
+        email: created.email,
+        phone: created.phone || "",
+        role: created.role,
+        status: created.status,
+        lastLogin: created.lastLogin || null,
+      };
+
+      // Trả 201 + message theo AC
+      if (typeof ApiResponse.success === "function") {
+        return ApiResponse.success(res, dto, "Thêm người dùng thành công", 201);
+      }
+      // fallback nếu utils không có success()
+      return res.status(201).json({
+        success: true,
+        message: "Thêm người dùng thành công",
+        data: dto
+      });
+    } catch (error) {
+      console.error("Create user error:", error);
+      return ApiResponse.error
+        ? ApiResponse.error(res, "Server error", 500)
+        : res.status(500).json({ success: false, message: "Server error" });
     }
   }
 }
