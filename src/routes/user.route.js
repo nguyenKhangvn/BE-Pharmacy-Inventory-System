@@ -15,4 +15,9 @@ router.get("/", auth, roleAuth(["admin"]), UserController.getUsers);
 // @access  Private (admin only)
 router.post("/", auth, roleAuth(["admin"]), UserController.createUser);
 
+// @route   GET /api/users/:id
+// @desc    Get user by ID
+// @access  Private (admin only)
+router.get("/:id", auth, roleAuth("admin"), UserController.getUserById);
+
 export default router;

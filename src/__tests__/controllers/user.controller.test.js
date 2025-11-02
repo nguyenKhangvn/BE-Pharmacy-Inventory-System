@@ -5,13 +5,15 @@ const mockFind = jest.fn();
 const mockCountDocuments = jest.fn();
 const mockCreate = jest.fn();
 const mockFindOne = jest.fn();
+const mockFindById = jest.fn();
 
 jest.unstable_mockModule('../../models/user.model.js', () => ({
   default: {
     find: mockFind,
     countDocuments: mockCountDocuments,
     create: mockCreate,
-    findOne: mockFindOne
+    findOne: mockFindOne,
+    findById: mockFindById
   }
 }));
 
@@ -1310,6 +1312,292 @@ describe('userController.createUser', () => {
       expect(typeof payload.data.id).toBe('string');
       expect(payload.data.id).toBe('507f1f77bcf86cd799439023');
       expect(payload.data).not.toHaveProperty('_id');
+    });
+  });
+});
+
+describe('userController.getUserById', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  const mockReqWithId = (id, user = { id: 'admin-id', role: 'admin' }) => ({
+    params: { id },
+    user
+  });
+
+  describe('AC: Lấy thông tin chi tiết người dùng', () => {
+    it('should return user details successfully', async () => {
+      const mockUser = {
+        _id: '507f1f77bcf86cd799439011',
+        username: 'testuser',
+        fullName: 'Test User',
+        email: 'test@example.com',
+        phone: '0123456789',
+        role: 'user',
+        status: 'active',
+        lastLogin: new Date('2024-01-15T10:30:00Z'),
+        createdAt: new Date('2024-01-01T00:00:00Z'),
+        updatedAt: new Date('2024-01-15T10:30:00Z')
+      };
+
+      const mockSelect = jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue(mockUser)
+      });
+
+      mockFindById.mockReturnValue({
+        select: mockSelect
+      });
+
+      const req = mockReqWithId('507f1f77bcf86cd799439011');
+      const res = mockRes();
+
+      await UserController.getUserById(req, res);
+
+      expect(mockFindById).toHaveBeenCalledWith('507f1f77bcf86cd799439011');
+      expect(mockSelect).toHaveBeenCalledWith('-password');
+      
+      expect(res.status).toHaveBeenCalledWith(200);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(true);
+      expect(payload.message).toBe('Lấy thông tin người dùng thành công');
+      expect(payload.data).toMatchObject({
+        id: '507f1f77bcf86cd799439011',
+        username: 'testuser',
+        fullName: 'Test User',
+        email: 'test@example.com',
+        phone: '0123456789',
+        role: 'user',
+        status: 'active'
+      });
+    });
+
+    it('should not return password field', async () => {
+      const mockUser = {
+        _id: '507f1f77bcf86cd799439011',
+        username: 'testuser',
+        fullName: 'Test User',
+        email: 'test@example.com',
+        phone: '0123456789',
+        role: 'user',
+        status: 'active',
+        lastLogin: null,
+        createdAt: new Date('2024-01-01T00:00:00Z'),
+        updatedAt: new Date('2024-01-01T00:00:00Z')
+      };
+
+      const mockSelect = jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue(mockUser)
+      });
+
+      mockFindById.mockReturnValue({
+        select: mockSelect
+      });
+
+      const req = mockReqWithId('507f1f77bcf86cd799439011');
+      const res = mockRes();
+
+      await UserController.getUserById(req, res);
+
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.data).not.toHaveProperty('password');
+    });
+
+    it('should handle missing optional fields (fullName, phone, lastLogin)', async () => {
+      const mockUser = {
+        _id: '507f1f77bcf86cd799439012',
+        username: 'minimaluser',
+        email: 'minimal@example.com',
+        role: 'user',
+        status: 'active',
+        createdAt: new Date('2024-01-01T00:00:00Z'),
+        updatedAt: new Date('2024-01-01T00:00:00Z')
+      };
+
+      const mockSelect = jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue(mockUser)
+      });
+
+      mockFindById.mockReturnValue({
+        select: mockSelect
+      });
+
+      const req = mockReqWithId('507f1f77bcf86cd799439012');
+      const res = mockRes();
+
+      await UserController.getUserById(req, res);
+
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.data.fullName).toBe('');
+      expect(payload.data.phone).toBe('');
+      expect(payload.data.lastLogin).toBe(null);
+    });
+
+    it('should convert _id to string id in response', async () => {
+      const mockUser = {
+        _id: '507f1f77bcf86cd799439013',
+        username: 'testuser',
+        email: 'test@example.com',
+        role: 'user',
+        status: 'active',
+        createdAt: new Date('2024-01-01T00:00:00Z'),
+        updatedAt: new Date('2024-01-01T00:00:00Z')
+      };
+
+      const mockSelect = jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue(mockUser)
+      });
+
+      mockFindById.mockReturnValue({
+        select: mockSelect
+      });
+
+      const req = mockReqWithId('507f1f77bcf86cd799439013');
+      const res = mockRes();
+
+      await UserController.getUserById(req, res);
+
+      const payload = res.json.mock.calls[0][0];
+      expect(typeof payload.data.id).toBe('string');
+      expect(payload.data.id).toBe('507f1f77bcf86cd799439013');
+      expect(payload.data).not.toHaveProperty('_id');
+    });
+  });
+
+  describe('AC: Validation', () => {
+    it('should return 400 for invalid ObjectId format', async () => {
+      const req = mockReqWithId('invalid-id');
+      const res = mockRes();
+
+      await UserController.getUserById(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+      expect(payload.message).toBe('ID người dùng không hợp lệ');
+    });
+
+    it('should return 400 for empty ID', async () => {
+      const req = mockReqWithId('');
+      const res = mockRes();
+
+      await UserController.getUserById(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+      expect(payload.message).toBe('ID người dùng không hợp lệ');
+    });
+
+    it('should return 400 for short ObjectId', async () => {
+      const req = mockReqWithId('123');
+      const res = mockRes();
+
+      await UserController.getUserById(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+    });
+  });
+
+  describe('AC: User not found', () => {
+    it('should return 404 when user does not exist', async () => {
+      const mockSelect = jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue(null)
+      });
+
+      mockFindById.mockReturnValue({
+        select: mockSelect
+      });
+
+      const req = mockReqWithId('507f1f77bcf86cd799439999');
+      const res = mockRes();
+
+      await UserController.getUserById(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+      expect(payload.message).toBe('Không tìm thấy người dùng');
+    });
+  });
+
+  describe('Error handling', () => {
+    it('should return 500 on database error', async () => {
+      const mockSelect = jest.fn().mockReturnValue({
+        lean: jest.fn().mockRejectedValue(new Error('Database error'))
+      });
+
+      mockFindById.mockReturnValue({
+        select: mockSelect
+      });
+
+      const req = mockReqWithId('507f1f77bcf86cd799439011');
+      const res = mockRes();
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+
+      await UserController.getUserById(req, res);
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'Get user by ID error:',
+        expect.any(Error)
+      );
+      expect(res.status).toHaveBeenCalledWith(500);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+      expect(payload.message).toBe('Server error');
+
+      consoleErrorSpy.mockRestore();
+    });
+  });
+
+  describe('AC: Response format và data structure', () => {
+    it('should return correct data structure', async () => {
+      const mockUser = {
+        _id: '507f1f77bcf86cd799439014',
+        username: 'structuretest',
+        fullName: 'Structure Test',
+        email: 'structure@example.com',
+        phone: '0987654321',
+        role: 'admin',
+        status: 'active',
+        lastLogin: new Date('2024-01-15T10:30:00Z'),
+        createdAt: new Date('2024-01-01T00:00:00Z'),
+        updatedAt: new Date('2024-01-15T10:30:00Z')
+      };
+
+      const mockSelect = jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue(mockUser)
+      });
+
+      mockFindById.mockReturnValue({
+        select: mockSelect
+      });
+
+      const req = mockReqWithId('507f1f77bcf86cd799439014');
+      const res = mockRes();
+
+      await UserController.getUserById(req, res);
+
+      const payload = res.json.mock.calls[0][0];
+      
+      // Verify response structure
+      expect(payload).toHaveProperty('success', true);
+      expect(payload).toHaveProperty('message');
+      expect(payload).toHaveProperty('data');
+      
+      // Verify data fields
+      expect(payload.data).toHaveProperty('id');
+      expect(payload.data).toHaveProperty('username');
+      expect(payload.data).toHaveProperty('fullName');
+      expect(payload.data).toHaveProperty('email');
+      expect(payload.data).toHaveProperty('phone');
+      expect(payload.data).toHaveProperty('role');
+      expect(payload.data).toHaveProperty('status');
+      expect(payload.data).toHaveProperty('lastLogin');
+      expect(payload.data).toHaveProperty('createdAt');
+      expect(payload.data).toHaveProperty('updatedAt');
     });
   });
 });
