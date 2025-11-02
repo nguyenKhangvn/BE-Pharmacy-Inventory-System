@@ -25,5 +25,10 @@ router.get("/:id", auth, roleAuth("admin"), UserController.getUserById);
 // @access  Private (admin only)
 router.put("/:id", auth, roleAuth(["admin"]), UserController.updateUser);
 
+// @route   PATCH /api/users/:id/status
+// @desc    Update user status (active/inactive)
+// @access  Private (admin only)
+router.patch("/:id/status", auth, roleAuth(["admin"]), UserController.updateUserStatus);
+
 
 export default router;

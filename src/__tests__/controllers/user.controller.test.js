@@ -39,6 +39,535 @@ const mockReqUpdate = (id, body = {}, user = { id: 'admin-id', role: 'admin' }) 
   user
 });
 
+// Update user status test
+describe('userController.updateUserStatus', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  const mockReqUpdateStatus = (id, body = {}, user = { id: 'admin-id', role: 'admin' }) => ({
+    params: { id },
+    body,
+    user
+  });
+
+  const makeDoc = (overrides = {}) => ({
+    _id: '507f1f77bcf86cd799439011',
+    username: 'testuser',
+    email: 'test@example.com',
+    fullName: 'Test User',
+    phone: '0123456789',
+    role: 'user',
+    status: 'active',
+    lastLogin: new Date('2024-01-15T10:30:00Z'),
+    createdAt: new Date('2024-01-01T00:00:00Z'),
+    updatedAt: new Date('2024-01-01T00:00:00Z'),
+    save: jest.fn().mockImplementation(function() {
+      this.updatedAt = new Date();
+      return Promise.resolve(this);
+    }),
+    ...overrides
+  });
+
+  describe('AC: Validation - ID và request body', () => {
+    it('should return 400 for invalid ObjectId format', async () => {
+      const req = mockReqUpdateStatus('invalid-id', { status: 'locked' });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+      
+      expect(res.status).toHaveBeenCalledWith(400);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+      expect(payload.message).toBe('ID người dùng không hợp lệ');
+    });
+
+    it('should return 400 for empty ID', async () => {
+      const req = mockReqUpdateStatus('', { status: 'locked' });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+      
+      expect(res.status).toHaveBeenCalledWith(400);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+      expect(payload.message).toBe('ID người dùng không hợp lệ');
+    });
+
+    it('should return 400 for short ObjectId', async () => {
+      const req = mockReqUpdateStatus('123abc', { status: 'locked' });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+      
+      expect(res.status).toHaveBeenCalledWith(400);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+    });
+
+    it('should return 400 when status is missing', async () => {
+      const req = mockReqUpdateStatus('507f1f77bcf86cd799439011', {});
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+      
+      expect(res.status).toHaveBeenCalledWith(400);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+      expect(payload.message).toMatch(/status không hợp lệ/i);
+    });
+
+    it('should return 400 for invalid status value', async () => {
+      const req = mockReqUpdateStatus('507f1f77bcf86cd799439011', { 
+        status: 'suspended' 
+      });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+      
+      expect(res.status).toHaveBeenCalledWith(400);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+      expect(payload.message).toMatch(/status không hợp lệ/i);
+      expect(payload.message).toMatch(/active.*locked/i);
+    });
+
+    it('should return 400 when status is not a string', async () => {
+      const req = mockReqUpdateStatus('507f1f77bcf86cd799439011', { 
+        status: 123 
+      });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+      
+      expect(res.status).toHaveBeenCalledWith(400);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+    });
+
+    it('should return 400 when status is null', async () => {
+      const req = mockReqUpdateStatus('507f1f77bcf86cd799439011', { 
+        status: null 
+      });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+      
+      expect(res.status).toHaveBeenCalledWith(400);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+    });
+
+    it('should return 400 when status is empty string', async () => {
+      const req = mockReqUpdateStatus('507f1f77bcf86cd799439011', { 
+        status: '' 
+      });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+      
+      expect(res.status).toHaveBeenCalledWith(400);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+    });
+  });
+
+  describe('AC: User not found', () => {
+    it('should return 404 when user does not exist', async () => {
+      mockFindById.mockResolvedValue(null);
+
+      const req = mockReqUpdateStatus('507f1f77bcf86cd799439099', { 
+        status: 'locked' 
+      });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+      
+      expect(mockFindById).toHaveBeenCalledWith('507f1f77bcf86cd799439099');
+      expect(res.status).toHaveBeenCalledWith(404);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+      expect(payload.message).toBe('Không tìm thấy người dùng');
+    });
+  });
+
+  describe('AC: Valid status values', () => {
+    it('should accept "active" as valid status', async () => {
+      const doc = makeDoc({ status: 'locked' });
+      mockFindById.mockResolvedValue(doc);
+
+      const req = mockReqUpdateStatus(doc._id, { status: 'active' });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+
+      expect(doc.status).toBe('active');
+      expect(doc.save).toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(200);
+      
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(true);
+      expect(payload.data.status).toBe('active');
+    });
+
+    it('should accept "locked" as valid status', async () => {
+      const doc = makeDoc({ status: 'active' });
+      mockFindById.mockResolvedValue(doc);
+
+      const req = mockReqUpdateStatus(doc._id, { status: 'locked' });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+
+      expect(doc.status).toBe('locked');
+      expect(doc.save).toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(200);
+      
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(true);
+      expect(payload.data.status).toBe('locked');
+    });
+  });
+
+  describe('AC: Idempotent behavior', () => {
+    it('should return success when status is already "active"', async () => {
+      const doc = makeDoc({ status: 'active' });
+      mockFindById.mockResolvedValue(doc);
+
+      const req = mockReqUpdateStatus(doc._id, { status: 'active' });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+
+      expect(doc.status).toBe('active');
+      expect(doc.save).not.toHaveBeenCalled(); // Idempotent - no save
+      expect(res.status).toHaveBeenCalledWith(200);
+      
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(true);
+      expect(payload.message).toBe('Trạng thái không thay đổi');
+      expect(payload.data.status).toBe('active');
+    });
+
+    it('should return success when status is already "locked"', async () => {
+      const doc = makeDoc({ status: 'locked' });
+      mockFindById.mockResolvedValue(doc);
+
+      const req = mockReqUpdateStatus(doc._id, { status: 'locked' });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+
+      expect(doc.status).toBe('locked');
+      expect(doc.save).not.toHaveBeenCalled(); // Idempotent - no save
+      expect(res.status).toHaveBeenCalledWith(200);
+      
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(true);
+      expect(payload.message).toBe('Trạng thái không thay đổi');
+      expect(payload.data.status).toBe('locked');
+    });
+  });
+
+  describe('AC: Successful status update', () => {
+    it('should update status from "active" to "locked" successfully', async () => {
+      const doc = makeDoc({ status: 'active' });
+      mockFindById.mockResolvedValue(doc);
+
+      const req = mockReqUpdateStatus(doc._id, { status: 'locked' });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+
+      expect(doc.status).toBe('locked');
+      expect(doc.save).toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(200);
+      
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(true);
+      expect(payload.message).toBe('Cập nhật trạng thái thành công');
+      expect(payload.data.status).toBe('locked');
+    });
+
+    it('should update status from "locked" to "active" successfully', async () => {
+      const doc = makeDoc({ status: 'locked' });
+      mockFindById.mockResolvedValue(doc);
+
+      const req = mockReqUpdateStatus(doc._id, { status: 'active' });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+
+      expect(doc.status).toBe('active');
+      expect(doc.save).toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(200);
+      
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(true);
+      expect(payload.message).toBe('Cập nhật trạng thái thành công');
+      expect(payload.data.status).toBe('active');
+    });
+
+    it('should only update status and not modify other fields', async () => {
+      const doc = makeDoc({
+        username: 'testuser',
+        email: 'test@example.com',
+        fullName: 'Test User',
+        role: 'user',
+        status: 'active'
+      });
+      mockFindById.mockResolvedValue(doc);
+
+      const req = mockReqUpdateStatus(doc._id, { status: 'locked' });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+
+      // Verify only status changed
+      expect(doc.status).toBe('locked');
+      expect(doc.username).toBe('testuser'); // unchanged
+      expect(doc.email).toBe('test@example.com'); // unchanged
+      expect(doc.fullName).toBe('Test User'); // unchanged
+      expect(doc.role).toBe('user'); // unchanged
+      expect(doc.save).toHaveBeenCalled();
+    });
+  });
+
+  describe('AC: Response format và data structure', () => {
+    it('should return correct response structure', async () => {
+      const doc = makeDoc({ status: 'active' });
+      mockFindById.mockResolvedValue(doc);
+
+      const req = mockReqUpdateStatus(doc._id, { status: 'locked' });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+
+      const payload = res.json.mock.calls[0][0];
+      
+      // Verify response structure
+      expect(payload).toHaveProperty('success', true);
+      expect(payload).toHaveProperty('message');
+      expect(payload).toHaveProperty('data');
+      
+      // Verify data fields
+      expect(payload.data).toHaveProperty('id');
+      expect(payload.data).toHaveProperty('username');
+      expect(payload.data).toHaveProperty('fullName');
+      expect(payload.data).toHaveProperty('email');
+      expect(payload.data).toHaveProperty('phone');
+      expect(payload.data).toHaveProperty('role');
+      expect(payload.data).toHaveProperty('status');
+      expect(payload.data).toHaveProperty('lastLogin');
+      expect(payload.data).toHaveProperty('createdAt');
+      expect(payload.data).toHaveProperty('updatedAt');
+      
+      // Should not return password
+      expect(payload.data).not.toHaveProperty('password');
+      expect(payload.data).not.toHaveProperty('_id');
+    });
+
+    it('should convert _id to string id in response', async () => {
+      const doc = makeDoc({ status: 'active' });
+      mockFindById.mockResolvedValue(doc);
+
+      const req = mockReqUpdateStatus(doc._id, { status: 'locked' });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+
+      const payload = res.json.mock.calls[0][0];
+      expect(typeof payload.data.id).toBe('string');
+      expect(payload.data.id).toBe('507f1f77bcf86cd799439011');
+      expect(payload.data).not.toHaveProperty('_id');
+    });
+
+    it('should handle missing optional fields in response', async () => {
+      const doc = makeDoc({
+        status: 'active',
+        fullName: undefined,
+        phone: undefined,
+        lastLogin: undefined
+      });
+      mockFindById.mockResolvedValue(doc);
+
+      const req = mockReqUpdateStatus(doc._id, { status: 'locked' });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.data.fullName).toBe('');
+      expect(payload.data.phone).toBe('');
+      expect(payload.data.lastLogin).toBe(null);
+    });
+
+    it('should return updated timestamp after status change', async () => {
+      const doc = makeDoc({ status: 'active' });
+      const originalUpdatedAt = doc.updatedAt;
+      mockFindById.mockResolvedValue(doc);
+
+      const req = mockReqUpdateStatus(doc._id, { status: 'locked' });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.data.updatedAt).not.toEqual(originalUpdatedAt);
+    });
+  });
+
+  describe('Error handling', () => {
+    it('should return 500 on database error during findById', async () => {
+      const dbError = new Error('Database connection failed');
+      mockFindById.mockRejectedValue(dbError);
+
+      const req = mockReqUpdateStatus('507f1f77bcf86cd799439011', { 
+        status: 'locked' 
+      });
+      const res = mockRes();
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+
+      await UserController.updateUserStatus(req, res);
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'Update user status error:', 
+        dbError
+      );
+      expect(res.status).toHaveBeenCalledWith(500);
+      
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+      expect(payload.message).toBe('Server error');
+
+      consoleErrorSpy.mockRestore();
+    });
+
+    it('should return 500 when save fails', async () => {
+      const doc = makeDoc({ status: 'active' });
+      const saveError = new Error('Save operation failed');
+      doc.save.mockRejectedValue(saveError);
+      
+      mockFindById.mockResolvedValue(doc);
+
+      const req = mockReqUpdateStatus(doc._id, { status: 'locked' });
+      const res = mockRes();
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+
+      await UserController.updateUserStatus(req, res);
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'Update user status error:', 
+        saveError
+      );
+      expect(res.status).toHaveBeenCalledWith(500);
+      
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+      expect(payload.message).toBe('Server error');
+
+      consoleErrorSpy.mockRestore();
+    });
+  });
+
+  describe('AC: Edge cases', () => {
+    it('should handle request with extra fields in body', async () => {
+      const doc = makeDoc({ status: 'active' });
+      mockFindById.mockResolvedValue(doc);
+
+      const req = mockReqUpdateStatus(doc._id, { 
+        status: 'locked',
+        role: 'admin',        // should be ignored
+        username: 'hacker',   // should be ignored
+        password: 'hack123'   // should be ignored
+      });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+
+      // Verify only status changed
+      expect(doc.status).toBe('locked');
+      expect(doc.role).toBe('user');        // unchanged
+      expect(doc.username).toBe('testuser'); // unchanged
+      expect(doc.save).toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    it('should handle status with leading/trailing spaces', async () => {
+      const doc = makeDoc({ status: 'active' });
+      mockFindById.mockResolvedValue(doc);
+
+      // Status with spaces should fail validation
+      const req = mockReqUpdateStatus(doc._id, { status: '  locked  ' });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+    });
+
+    it('should handle case-sensitive status value', async () => {
+      const doc = makeDoc({ status: 'active' });
+      mockFindById.mockResolvedValue(doc);
+
+      // "LOCKED" should fail validation (case-sensitive)
+      const req = mockReqUpdateStatus(doc._id, { status: 'LOCKED' });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(false);
+    });
+  });
+
+  describe('AC: Business rules', () => {
+    it('should allow locking an active user', async () => {
+      const doc = makeDoc({ status: 'active' });
+      mockFindById.mockResolvedValue(doc);
+
+      const req = mockReqUpdateStatus(doc._id, { status: 'locked' });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+
+      expect(doc.status).toBe('locked');
+      expect(doc.save).toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    it('should allow unlocking a locked user', async () => {
+      const doc = makeDoc({ status: 'locked' });
+      mockFindById.mockResolvedValue(doc);
+
+      const req = mockReqUpdateStatus(doc._id, { status: 'active' });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+
+      expect(doc.status).toBe('active');
+      expect(doc.save).toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    it('should work for user with any role (admin/user)', async () => {
+      const adminDoc = makeDoc({ role: 'admin', status: 'active' });
+      mockFindById.mockResolvedValue(adminDoc);
+
+      const req = mockReqUpdateStatus(adminDoc._id, { status: 'locked' });
+      const res = mockRes();
+
+      await UserController.updateUserStatus(req, res);
+
+      expect(adminDoc.status).toBe('locked');
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+  });
+});
+
 describe('userController.getUsers', () => {
   let findMock;
   
@@ -1652,6 +2181,7 @@ describe('userController.updateUser', () => {
 
       await UserController.updateUser(req, res);
       
+     
       expect(res.status).toHaveBeenCalledWith(400);
       const payload = res.json.mock.calls[0][0];
       expect(payload.success).toBe(false);
@@ -1698,7 +2228,7 @@ describe('userController.updateUser', () => {
       // Mock username check - no duplicate
       const leanFn = jest.fn()
         .mockResolvedValueOnce(null)                          // username ok
-        .mockResolvedValueOnce({ _id: 'another-user-id' });   // email duplicate
+        .mockResolvedValueOnce({ _id: 'another-user-id' });// email duplicate
       
       mockFindOne.mockReturnValue({ lean: leanFn });
 
@@ -1931,7 +2461,7 @@ describe('userController.updateUser', () => {
 
       expect(doc.save).toHaveBeenCalled();
       expect(res.status).toHaveBeenCalledWith(200);
-
+      
       const payload = res.json.mock.calls[0][0];
       expect(payload.success).toBe(true);
       expect(payload.message).toBe('Cập nhật thông tin thành công');
@@ -2050,9 +2580,6 @@ describe('userController.updateUser', () => {
       doc.save.mockRejectedValue(saveError);
       
       mockFindById.mockResolvedValue(doc);
-
-      const leanFn = jest.fn().mockResolvedValue(null);
-      mockFindOne.mockReturnValue({ lean: leanFn });
 
       const req = mockReqUpdate(doc._id, { fullName: 'Test' });
       const res = mockRes();
