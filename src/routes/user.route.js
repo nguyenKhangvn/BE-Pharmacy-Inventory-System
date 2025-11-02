@@ -20,10 +20,4 @@ router.post("/", auth, roleAuth(["admin"]), UserController.createUser);
 // @access  Private (admin only)
 router.get("/:id", auth, roleAuth("admin"), UserController.getUserById);
 
-// @route   PUT /api/users/:id
-// @desc    Update user
-// @access  Private (admin only)
-router.put("/:id", auth, roleAuth(["admin"]), UserController.updateUser);
-
-
 export default router;
