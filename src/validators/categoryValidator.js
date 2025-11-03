@@ -2,13 +2,6 @@ import { body, param, query, validationResult } from "express-validator";
 
 // Category validation rules
 export const validateCreateCategory = [
-  body("code")
-    .trim()
-    .notEmpty()
-    .withMessage("Category code is required")
-    .isLength({ max: 64 })
-    .withMessage("Category code must not exceed 64 characters"),
-
   body("name")
     .trim()
     .notEmpty()
