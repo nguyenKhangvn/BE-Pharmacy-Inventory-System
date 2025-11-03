@@ -19,7 +19,7 @@ const SupplierSchema = new mongoose.Schema(
       maxlength: [200, "Tên nhà cung cấp không được quá 200 ký tự"],
       index: true, // For search
     },
-    contactPerson: {
+    contactName: {
       type: String,
       trim: true,
       maxlength: [150, "Tên người liên hệ không được quá 150 ký tự"],
