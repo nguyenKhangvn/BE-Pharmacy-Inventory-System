@@ -42,7 +42,7 @@ const createSupplier = (overrides = {}) =>
   Supplier.create({
     code: "SUP001",
     name: "Default Supplier",
-    contactPerson: "Mr. A",
+    contactName: "Mr. A",
     phone: "0123456789",
     email: "supplier@example.com",
     address: "Somewhere",
