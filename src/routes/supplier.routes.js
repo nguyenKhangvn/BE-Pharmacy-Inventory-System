@@ -15,4 +15,9 @@ router.get("/", auth, roleAuth(["admin"]), SupplierController.getSuppliers);
 // @access  Private (admin only)
 router.post("/", auth, roleAuth(["admin"]), SupplierController.createSupplier);
 
+// @route   PUT /api/suppliers/:id
+// @desc    Update supplier
+// @access  Private (admin only)
+router.put("/:id", auth, roleAuth(["admin"]), SupplierController.updateSupplier);
+
 export default router;

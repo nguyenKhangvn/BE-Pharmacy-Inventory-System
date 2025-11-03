@@ -6,6 +6,7 @@ const mockFind = jest.fn();
 const mockCountDocuments = jest.fn();
 const mockFindOne = jest.fn();
 const mockCreate = jest.fn();
+const mockFindById = jest.fn();
 
 // Mock Supplier model (ESM)
 jest.unstable_mockModule('../../models/supplier.model.js', () => ({
@@ -13,7 +14,8 @@ jest.unstable_mockModule('../../models/supplier.model.js', () => ({
     find: mockFind,
     countDocuments: mockCountDocuments,
     findOne: mockFindOne,
-    create: mockCreate
+    create: mockCreate,
+    findById: mockFindById,
   }
 }));
 
@@ -678,5 +680,237 @@ describe('SupplierController.createSupplier', () => {
       status: 'active'
     });
     expect(payload.data).toHaveProperty('createdAt');
+  });
+});
+
+// ======================= UPDATE SUPPLIER TESTS (PUT) =======================
+describe('SupplierController.updateSupplier', () => {
+  const mockResObj = () => {
+    const res = {};
+    res.status = jest.fn(() => res);
+    res.json  = jest.fn(() => res);
+    return res;
+  };
+  const mockReqPut = (id, body = {}) => ({ params: { id }, body });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('400 nếu id không hợp lệ', async () => {
+    const res = mockResObj();
+    await SupplierController.updateSupplier(mockReqPut('invalid', {}), res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json.mock.calls[0][0].message).toMatch(/không hợp lệ/i);
+    expect(mockFindById).not.toHaveBeenCalled();
+  });
+
+  it('404 nếu không tìm thấy NCC', async () => {
+    mockFindById.mockResolvedValue(null);
+    const res = mockResObj();
+    await SupplierController.updateSupplier(
+      mockReqPut('507f1f77bcf86cd799439200', {}),
+      res
+    );
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(res.json.mock.calls[0][0].message).toMatch(/không tìm thấy/i);
+  });
+
+  it('400 khi email không đúng định dạng', async () => {
+    const doc = {
+      _id: '507f1f77bcf86cd799439201',
+      code: 'SUP0007',
+      name: 'Old',
+      phone: '090',
+      email: 'old@sup.vn',
+      address: 'Old addr',
+      taxCode: '0312',
+      contactName: 'Old Contact',
+      status: 'active',
+      save: jest.fn().mockResolvedValue(true),
+      createdAt: new Date(),
+      ordersCount: 0,
+      lastOrderAt: null
+    };
+    mockFindById.mockResolvedValue(doc);
+
+    const res = mockResObj();
+    await SupplierController.updateSupplier(
+      mockReqPut('507f1f77bcf86cd799439201', { email: 'invalid' }),
+      res
+    );
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json.mock.calls[0][0].message).toMatch(/định dạng/i);
+    expect(doc.save).not.toHaveBeenCalled();
+  });
+
+  it('400 khi kết quả cuối cùng thiếu trường bắt buộc (ví dụ name = "   ")', async () => {
+    const doc = {
+      _id: '507f1f77bcf86cd799439202',
+      code: 'SUP0008',
+      name: 'Have',
+      phone: '090',
+      email: 'ok@sup.vn',
+      address: 'Addr',
+      taxCode: '',
+      contactName: '',
+      status: 'active',
+      save: jest.fn().mockResolvedValue(true),
+      createdAt: new Date(),
+      ordersCount: 0,
+      lastOrderAt: null
+    };
+    mockFindById.mockResolvedValue(doc);
+
+    const res = mockResObj();
+    await SupplierController.updateSupplier(
+      mockReqPut('507f1f77bcf86cd799439202', { name: '   ' }),
+      res
+    );
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json.mock.calls[0][0].message).toMatch(/bắt buộc/i);
+  });
+
+  it('400 nếu status không hợp lệ', async () => {
+    const doc = {
+      _id: '507f1f77bcf86cd799439203',
+      code: 'SUP0009',
+      name: 'S',
+      phone: '090',
+      email: 's@sup.vn',
+      address: 'A',
+      taxCode: '',
+      contactName: '',
+      status: 'active',
+      save: jest.fn().mockResolvedValue(true),
+      createdAt: new Date(),
+      ordersCount: 1,
+      lastOrderAt: null
+    };
+    mockFindById.mockResolvedValue(doc);
+
+    const res = mockResObj();
+    await SupplierController.updateSupplier(
+      mockReqPut('507f1f77bcf86cd799439203', { status: 'paused' }),
+      res
+    );
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json.mock.calls[0][0].message).toMatch(/không hợp lệ/i);
+  });
+
+  it('200 cập nhật thành công, giữ nguyên code dù body có gửi code mới', async () => {
+    const doc = {
+      _id: '507f1f77bcf86cd799439204',
+      code: 'SUP0010',
+      name: 'Old Name',
+      phone: '090',
+      email: 'old@sup.vn',
+      address: 'Old Addr',
+      taxCode: '0312',
+      contactName: 'Old Contact',
+      status: 'active',
+      ordersCount: 5,
+      lastOrderAt: new Date('2025-10-01T00:00:00Z'),
+      createdAt: new Date('2025-09-30T00:00:00Z'),
+      save: jest.fn().mockResolvedValue(true)
+    };
+    mockFindById.mockResolvedValue(doc);
+
+    const res = mockResObj();
+    await SupplierController.updateSupplier(
+      mockReqPut('507f1f77bcf86cd799439204', {
+        code: 'SUP9999',              // phải bị ignore
+        name: 'New Name',
+        phone: '091',
+        email: 'NEW@SUP.VN',
+        address: 'New Addr',
+        taxCode: '099',
+        contactName: 'New Contact',
+        status: 'inactive'
+      }),
+      res
+    );
+
+    // Không đổi code
+    expect(doc.code).toBe('SUP0010');
+    expect(doc.save).toHaveBeenCalled();
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const payload = res.json.mock.calls[0][0];
+    expect(payload.success).toBe(true);
+    expect(payload.message).toBe('Cập nhật thông tin thành công');
+    expect(payload.data).toMatchObject({
+      id: '507f1f77bcf86cd799439204',
+      code: 'SUP0010',                 // unchanged
+      name: 'New Name',
+      address: 'New Addr',
+      taxCode: '099',
+      contactName: 'New Contact',
+      contact: { phone: '091', email: 'new@sup.vn' }, // normalize email lower-case
+      status: 'inactive',
+      orders: { count: 5, lastDate: new Date('2025-10-01T00:00:00Z') }
+    });
+  });
+
+  it('giữ nguyên các trường không gửi lên (chỉ đổi status)', async () => {
+    const doc = {
+      _id: '507f1f77bcf86cd799439205',
+      code: 'SUP0011',
+      name: 'Keep',
+      phone: '090',
+      email: 'keep@sup.vn',
+      address: 'Addr',
+      taxCode: '',
+      contactName: '',
+      status: 'active',
+      createdAt: new Date(),
+      ordersCount: 0,
+      lastOrderAt: null,
+      save: jest.fn().mockResolvedValue(true)
+    };
+    mockFindById.mockResolvedValue(doc);
+
+    const res = mockResObj();
+    await SupplierController.updateSupplier(
+      mockReqPut('507f1f77bcf86cd799439205', { status: 'inactive' }),
+      res
+    );
+
+    expect(doc.name).toBe('Keep');
+    expect(doc.email).toBe('keep@sup.vn');
+    expect(res.status).toHaveBeenCalledWith(200);
+    const payload = res.json.mock.calls[0][0];
+    expect(payload.data.status).toBe('inactive');
+  });
+
+  it('500 khi save ném lỗi', async () => {
+    const doc = {
+      _id: '507f1f77bcf86cd799439206',
+      code: 'SUP0012',
+      name: 'S',
+      phone: '090',
+      email: 's@sup.vn',
+      address: 'A',
+      taxCode: '',
+      contactName: '',
+      status: 'active',
+      createdAt: new Date(),
+      ordersCount: 0,
+      lastOrderAt: null,
+      save: jest.fn().mockRejectedValue(new Error('DB fail'))
+    };
+    mockFindById.mockResolvedValue(doc);
+
+    const res = mockResObj();
+    const spy = jest.spyOn(console, 'error').mockImplementation();
+
+    await SupplierController.updateSupplier(
+      mockReqPut('507f1f77bcf86cd799439206', { name: 'New', email: 'new@sup.vn', phone: '091', address: 'B' }),
+      res
+    );
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json.mock.calls[0][0].message).toMatch(/Server error/i);
+    spy.mockRestore();
   });
 });
