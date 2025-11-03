@@ -1,93 +1,255 @@
 import Supplier from "../models/supplier.model.js";
 import ApiResponse from "../utils/ApiResponse.js";
 
+// Danh sách field được phép sort
+const ALLOWED_SORT_FIELDS = ["createdAt", "name", "lastOrderAt", "code"];
+const ALLOWED_STATUS = ["active", "inactive"];
+
+// Projection fields
+const PROJECTION =
+  "code name taxCode contactName phone email address ordersCount lastOrderAt status createdAt";
+
 class SupplierController {
-  // @desc   Lấy danh sách NCC (pagination + search theo tên/mã số thuế/mã)
-  // @route  GET /api/suppliers
-  // @access Private (Admin)
+  // @desc    Get all suppliers with pagination, search, filter
+  // @route   GET /api/suppliers
+  // @access  Private
   static async getSuppliers(req, res) {
     try {
       const {
         q = "",
         page = 1,
         limit = 25,
-        sortBy = "createdAt",   // code|name|taxCode|ordersCount|lastOrderAt|status|createdAt
-        sortOrder = "desc",     // asc|desc
-        status                  // optional filter
+        sortBy = "createdAt",
+        sortOrder = "desc",
+        status,
       } = req.query;
 
       // Chuẩn hoá phân trang theo AC (25/50/100)
-      const allowed = [25, 50, 100];
-      const pageSize = allowed.includes(+limit) ? +limit : 25;
-      const pageNum  = Math.max(parseInt(page, 10) || 1, 1);
+      const allowedLimits = [25, 50, 100];
+      const pageSize = allowedLimits.includes(+limit) ? +limit : 25;
+      const pageNum = Math.max(parseInt(page, 10) || 1, 1);
 
-      // Lọc & tìm kiếm
+      // Xây dựng query
       const query = {};
-      if (q && q.trim()) {
-        const safe = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const regex = new RegExp(safe, "i");
-        // tìm theo tên, mã số thuế, mã NCC
-        query.$or = [{ name: regex }, { taxCode: regex }, { code: regex }];
+
+      // Filter theo status nếu có
+      if (status) {
+        query.status = status;
       }
-      if (status) query.status = status;
 
-      // Chỉ lấy các cột UI cần (bám AC)
-      const projection =
-        "code name taxCode contactName phone email address ordersCount lastOrderAt status createdAt";
+      // Tìm kiếm theo tên, mã số thuế, hoặc mã NCC
+      if (q && q.trim()) {
+        const searchTerm = q.trim();
+        // Escape regex special characters
+        const escaped = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const regex = new RegExp(escaped, "i");
 
-      // Sắp xếp an toàn
-      const sortMap = {
-        code: "code",
-        name: "name",
-        taxCode: "taxCode",
-        ordersCount: "ordersCount",
-        lastOrderAt: "lastOrderAt",
-        status: "status",
-        createdAt: "createdAt"
-      };
-      const sortField = sortMap[sortBy] || "createdAt";
-      const sort = { [sortField]: sortOrder === "asc" ? 1 : -1 };
+        query.$or = [
+          { name: regex },
+          { taxCode: regex },
+          { code: regex },
+        ];
+      }
 
-      // Truy vấn DB
+      // Sắp xếp
+      const sortField = ALLOWED_SORT_FIELDS.includes(sortBy)
+        ? sortBy
+        : "createdAt";
+      const sortDirection = sortOrder === "asc" ? 1 : -1;
+      const sortObj = { [sortField]: sortDirection };
+
+      // Query với pagination
+      const skip = (pageNum - 1) * pageSize;
       const [items, total] = await Promise.all([
-        Supplier.find(query, projection)
-          .sort(sort)
-          .skip((pageNum - 1) * pageSize)
+        Supplier.find(query, PROJECTION)
+          .sort(sortObj)
+          .skip(skip)
           .limit(pageSize)
           .lean(),
-        Supplier.countDocuments(query)
+        Supplier.countDocuments(query),
       ]);
 
-      // Map DTO theo AC
-      const data = items.map(s => ({
-        id: String(s._id),
-        code: s.code,                         // Mã NCC
-        name: s.name,                         // Tên NCC
-        address: s.address || "",             // hiển thị kèm tên (FE có thể concat)
-        taxCode: s.taxCode || "",
-        contactName: s.contactName || "",
+      // Map sang DTO
+      const data = items.map((item) => ({
+        id: String(item._id),
+        code: item.code,
+        name: item.name,
+        address: item.address || "",
+        taxCode: item.taxCode || "",
+        contactName: item.contactName || "",
         contact: {
-          phone: s.phone || "",
-          email: s.email || ""
+          phone: item.phone || "",
+          email: item.email || "",
         },
         orders: {
-          count: s.ordersCount || 0,
-          lastDate: s.lastOrderAt || null
+          count: item.ordersCount || 0,
+          lastDate: item.lastOrderAt || null,
         },
-        status: s.status,                     // active/inactive
-        createdAt: s.createdAt
+        status: item.status,
       }));
 
+      // Pagination metadata
       const pagination = {
         page: pageNum,
         limit: pageSize,
         total,
-        pages: Math.ceil(total / pageSize)
+        pages: Math.ceil(total / pageSize) || 0,
       };
 
-      return ApiResponse.paginated(res, data, pagination, "Suppliers retrieved successfully");
-    } catch (err) {
-      console.error("GET /api/suppliers error:", err);
+      return ApiResponse.paginated(
+        res,
+        data,
+        pagination,
+        "Suppliers retrieved successfully"
+      );
+    } catch (error) {
+      console.error("GET /api/suppliers error:", error);
+      return ApiResponse.error(res, "Server error", 500);
+    }
+  }
+
+  // @desc    Create new supplier
+  // @route   POST /api/suppliers
+  // @access  Private (admin)
+  static async createSupplier(req, res) {
+    try {
+      const {
+        name,
+        phone,
+        email,
+        address,
+        taxCode,
+        contactName,
+        status,
+      } = req.body || {};
+
+      // --- Validation bắt buộc ---
+      if (!name || !phone || !email || !address) {
+        return ApiResponse.error(
+          res,
+          "name, phone, email, address là bắt buộc",
+          400
+        );
+      }
+
+      // Validate email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      const emailTrimmed = (email || "").trim().toLowerCase();
+      if (!emailRegex.test(emailTrimmed)) {
+        return ApiResponse.error(res, "Email không đúng định dạng", 400);
+      }
+
+      // --- Chuẩn hoá dữ liệu ---
+      const normalized = {
+        name: (name || "").trim(),
+        phone: (phone || "").trim(),
+        email: emailTrimmed,
+        address: (address || "").trim(),
+        taxCode: (taxCode || "").trim(),
+        contactName: (contactName || "").trim(),
+      };
+
+      // Normalize status
+      const normalizedStatus = ALLOWED_STATUS.includes(status)
+        ? status
+        : "active";
+
+      // --- Lấy mã supplier cuối cùng để sinh mã mới ---
+      let lastSupplier;
+      try {
+        lastSupplier = await Supplier.findOne({}, { code: 1 })
+          .sort({ createdAt: -1 })
+          .lean();
+      } catch (err) {
+        console.error("Error fetching last supplier:", err);
+        return ApiResponse.error(res, "Server error", 500);
+      }
+
+      // Sinh mã mới
+      let nextCode;
+      if (lastSupplier && lastSupplier.code) {
+        const match = lastSupplier.code.match(/\d+$/);
+        if (match) {
+          const lastNumber = parseInt(match[0], 10);
+          const newNumber = lastNumber + 1;
+          nextCode = `SUP${String(newNumber).padStart(4, "0")}`;
+        } else {
+          nextCode = "SUP0001";
+        }
+      } else {
+        nextCode = "SUP0001";
+      }
+
+      // --- Retry logic khi trùng code ---
+      const MAX_RETRIES = 5;
+      let attempts = 0;
+      let created = null;
+
+      while (attempts < MAX_RETRIES) {
+        try {
+          created = await Supplier.create({
+            code: nextCode,
+            ...normalized,
+            status: normalizedStatus,
+          });
+          break; // Thành công, thoát vòng lặp
+        } catch (err) {
+          // Kiểm tra lỗi duplicate key trên code
+          if (err.code === 11000 && err.keyPattern?.code) {
+            attempts++;
+            // Tăng mã lên 1
+            const match = nextCode.match(/\d+$/);
+            if (match) {
+              const num = parseInt(match[0], 10) + 1;
+              nextCode = `SUP${String(num).padStart(4, "0")}`;
+            } else {
+              // Không parse được, fallback
+              nextCode = `SUP${String(Date.now()).slice(-4)}`;
+            }
+          } else {
+            // Lỗi khác, throw ra ngoài
+            throw err;
+          }
+        }
+      }
+
+      // Nếu retry hết mà vẫn không tạo được
+      if (!created) {
+        return ApiResponse.error(
+          res,
+          "Không thể tạo mã nhà cung cấp sau nhiều lần thử",
+          409
+        );
+      }
+
+      // --- Map sang DTO ---
+      const data = {
+        id: String(created._id),
+        code: created.code,
+        name: created.name,
+        address: created.address || "",
+        taxCode: created.taxCode || "",
+        contactName: created.contactName || "",
+        contact: {
+          phone: created.phone || "",
+          email: created.email || "",
+        },
+        orders: {
+          count: created.ordersCount || 0,
+          lastDate: created.lastOrderAt || null,
+        },
+        status: created.status,
+        createdAt: created.createdAt,
+      };
+
+      return ApiResponse.success(
+        res,
+        data,
+        "Thêm nhà cung cấp thành công",
+        201
+      );
+    } catch (error) {
+      console.error("Create supplier error:", error);
       return ApiResponse.error(res, "Server error", 500);
     }
   }
