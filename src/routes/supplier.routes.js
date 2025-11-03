@@ -10,4 +10,9 @@ const router = express.Router();
 // @access  Private (admin only)
 router.get("/", auth, roleAuth(["admin"]), SupplierController.getSuppliers);
 
+// @route   POST /api/suppliers
+// @desc    Create new supplier
+// @access  Private (admin only)
+router.post("/", auth, roleAuth(["admin"]), SupplierController.createSupplier);
+
 export default router;

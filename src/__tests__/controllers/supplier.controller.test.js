@@ -4,12 +4,16 @@ import { jest } from '@jest/globals';
 // ---------- Mocks ----------
 const mockFind = jest.fn();
 const mockCountDocuments = jest.fn();
+const mockFindOne = jest.fn();
+const mockCreate = jest.fn();
 
 // Mock Supplier model (ESM)
 jest.unstable_mockModule('../../models/supplier.model.js', () => ({
   default: {
     find: mockFind,
-    countDocuments: mockCountDocuments
+    countDocuments: mockCountDocuments,
+    findOne: mockFindOne,
+    create: mockCreate
   }
 }));
 
@@ -27,9 +31,15 @@ const errorSpy = jest.fn((res, message = 'Server error', code = 500) => {
 jest.unstable_mockModule('../../utils/ApiResponse.js', () => ({
   default: {
     paginated: paginatedSpy,
-    error: errorSpy
+    error: errorSpy,
+    success: successSpy
   }
 }));
+const successSpy = jest.fn((res, data, message = 'OK', code = 200) => {
+  res.status(code);
+  res.json({ success: true, message, data });
+  return res;
+});
 
 // Import sau khi mock
 const { default: Supplier } = await import('../../models/supplier.model.js');
@@ -54,6 +64,21 @@ function makeFindChain(items, captured) {
     lean: jest.fn(async () => items)
   };
   return chain;
+}
+
+function makeFindOneChainResolved(last) {
+  return {
+    sort: jest.fn(() => ({
+      lean: jest.fn().mockResolvedValue(last)
+    }))
+  };
+}
+function makeFindOneChainRejected(err) {
+  return {
+    sort: jest.fn(() => ({
+      lean: jest.fn().mockRejectedValue(err)
+    }))
+  };
 }
 
 const PROJECTION =
@@ -338,4 +363,320 @@ describe('SupplierController.getSuppliers', () => {
     expect(payload.pagination).toMatchObject({ page: 2, limit: 50, total: 27, pages: 1 });
   });
 });
-// npm test -- __tests__/controllers/supplier.controller.test.js
+
+// ======================= CREATE SUPPLIER TESTS =======================
+describe('SupplierController.createSupplier', () => {
+  // createSupplier dùng body, nên ta tạo helper riêng
+  const mockReqBody = (body = {}) => ({ body });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  // ---- Validation bắt buộc ----
+  it('400 nếu thiếu name', async () => {
+    const res = mockRes();
+    await SupplierController.createSupplier(
+      mockReqBody({ phone: '1', email: 'a@a.com', address: 'X' }),
+      res
+    );
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json.mock.calls[0][0].message).toMatch(/bắt buộc/i);
+  });
+
+  it('400 nếu thiếu phone', async () => {
+    const res = mockRes();
+    await SupplierController.createSupplier(
+      mockReqBody({ name: 'A', email: 'a@a.com', address: 'X' }),
+      res
+    );
+    expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  it('400 nếu thiếu email', async () => {
+    const res = mockRes();
+    await SupplierController.createSupplier(
+      mockReqBody({ name: 'A', phone: '1', address: 'X' }),
+      res
+    );
+    expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  it('400 nếu thiếu address', async () => {
+    const res = mockRes();
+    await SupplierController.createSupplier(
+      mockReqBody({ name: 'A', phone: '1', email: 'a@a.com' }),
+      res
+    );
+    expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  it('400 nếu email không hợp lệ', async () => {
+    const res = mockRes();
+    await SupplierController.createSupplier(
+      mockReqBody({ name: 'A', phone: '1', email: 'invalid', address: 'X' }),
+      res
+    );
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json.mock.calls[0][0].message).toMatch(/định dạng/i);
+  });
+
+  // ---- Thành công: sinh code ----
+  it('201 khi tạo thành công; sinh code SUP0001 nếu chưa có bản ghi', async () => {
+    mockFindOne.mockReturnValue(makeFindOneChainResolved(null)); // không có last
+    const created = {
+      _id: '507f1f77bcf86cd799439100',
+      code: 'SUP0001',
+      name: 'Cty Dược A',
+      phone: '090',
+      email: 'a@a.com',
+      address: '12 Nguyen Trai',
+      taxCode: '',
+      contactName: '',
+      status: 'active',
+      ordersCount: 0,
+      lastOrderAt: null,
+      createdAt: new Date('2025-10-01T00:00:00Z')
+    };
+    mockCreate.mockResolvedValue(created);
+
+    const res = mockRes();
+    await SupplierController.createSupplier(
+      mockReqBody({ name: '  Cty Dược A ', phone: ' 090 ', email: ' A@A.COM ', address: ' 12 Nguyen Trai ' }),
+      res
+    );
+
+    expect(Supplier.findOne).toHaveBeenCalled();
+    expect(Supplier.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: 'SUP0001',
+        name: 'Cty Dược A',
+        phone: '090',
+        email: 'a@a.com',
+        address: '12 Nguyen Trai',
+        status: 'active'
+      })
+    );
+    expect(res.status).toHaveBeenCalledWith(201);
+    const payload = res.json.mock.calls[0][0];
+    expect(payload.success).toBe(true);
+    expect(payload.message).toBe('Thêm nhà cung cấp thành công');
+    expect(payload.data).toMatchObject({
+      id: '507f1f77bcf86cd799439100',
+      code: 'SUP0001',
+      name: 'Cty Dược A',
+      status: 'active',
+      orders: { count: 0, lastDate: null }
+    });
+  });
+
+  it('201; sinh code kế tiếp SUP0008 khi last là SUP0007', async () => {
+    mockFindOne.mockReturnValue(makeFindOneChainResolved({ code: 'SUP0007' }));
+    mockCreate.mockResolvedValue({
+      _id: '507f1f77bcf86cd799439101',
+      code: 'SUP0008',
+      name: 'B',
+      phone: '1',
+      email: 'b@b.com',
+      address: 'X',
+      status: 'active',
+      ordersCount: 0,
+      lastOrderAt: null,
+      createdAt: new Date()
+    });
+
+    const res = mockRes();
+    await SupplierController.createSupplier(
+      mockReqBody({ name: 'B', phone: '1', email: 'b@b.com', address: 'X' }),
+      res
+    );
+
+    expect(Supplier.create).toHaveBeenCalledWith(expect.objectContaining({ code: 'SUP0008' }));
+    expect(res.status).toHaveBeenCalledWith(201);
+  });
+
+  // ---- Status normalization ----
+  it('status invalid → default "active"', async () => {
+    mockFindOne.mockReturnValue(makeFindOneChainResolved(null));
+    mockCreate.mockResolvedValue({
+      _id: '507f1f77bcf86cd799439102',
+      code: 'SUP0001',
+      name: 'C',
+      phone: '1',
+      email: 'c@c.com',
+      address: 'X',
+      status: 'active',
+      createdAt: new Date()
+    });
+
+    const res = mockRes();
+    await SupplierController.createSupplier(
+      mockReqBody({ name: 'C', phone: '1', email: 'c@c.com', address: 'X', status: 'paused' }),
+      res
+    );
+    expect(Supplier.create).toHaveBeenCalledWith(expect.objectContaining({ status: 'active' }));
+  });
+
+  it('status hợp lệ "inactive" được giữ nguyên', async () => {
+    mockFindOne.mockReturnValue(makeFindOneChainResolved({ code: 'SUP0001' }));
+    mockCreate.mockResolvedValue({
+      _id: '507f1f77bcf86cd799439103',
+      code: 'SUP0002',
+      name: 'D',
+      phone: '1',
+      email: 'd@d.com',
+      address: 'X',
+      status: 'inactive',
+      createdAt: new Date()
+    });
+
+    const res = mockRes();
+    await SupplierController.createSupplier(
+      mockReqBody({ name: 'D', phone: '1', email: 'd@d.com', address: 'X', status: 'inactive' }),
+      res
+    );
+    expect(Supplier.create).toHaveBeenCalledWith(expect.objectContaining({ status: 'inactive' }));
+  });
+
+  // ---- Retry khi trùng mã (duplicate key) ----
+  it('retry khi trùng code: SUP0008 bị trùng → thử SUP0009', async () => {
+    mockFindOne.mockReturnValue(makeFindOneChainResolved({ code: 'SUP0007' }));
+    const dupErr = Object.assign(new Error('dup'), { code: 11000, keyPattern: { code: 1 } });
+
+    mockCreate
+      .mockRejectedValueOnce(dupErr) // SUP0008 trùng
+      .mockResolvedValueOnce({
+        _id: '507f1f77bcf86cd799439104',
+        code: 'SUP0009',
+        name: 'E',
+        phone: '1',
+        email: 'e@e.com',
+        address: 'X',
+        status: 'active',
+        createdAt: new Date()
+      });
+
+    const res = mockRes();
+    await SupplierController.createSupplier(
+      mockReqBody({ name: 'E', phone: '1', email: 'e@e.com', address: 'X' }),
+      res
+    );
+
+    expect(Supplier.create.mock.calls[0][0].code).toBe('SUP0008');
+    expect(Supplier.create.mock.calls[1][0].code).toBe('SUP0009');
+    expect(res.status).toHaveBeenCalledWith(201);
+  });
+
+  it('409 nếu trùng mã quá số lần retry', async () => {
+    mockFindOne.mockReturnValue(makeFindOneChainResolved({ code: 'SUP0007' }));
+    const dupErr = Object.assign(new Error('dup'), { code: 11000, keyPattern: { code: 1 } });
+    // 5 lần trùng liên tiếp
+    mockCreate
+      .mockRejectedValueOnce(dupErr)
+      .mockRejectedValueOnce(dupErr)
+      .mockRejectedValueOnce(dupErr)
+      .mockRejectedValueOnce(dupErr)
+      .mockRejectedValueOnce(dupErr);
+
+    const res = mockRes();
+    await SupplierController.createSupplier(
+      mockReqBody({ name: 'E', phone: '1', email: 'e@e.com', address: 'X' }),
+      res
+    );
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json.mock.calls[0][0].message).toMatch(/Không thể tạo mã nhà cung cấp/i);
+  });
+
+  // ---- Error handling ----
+  it('500 nếu findOne().lean() reject', async () => {
+    mockFindOne.mockReturnValue(makeFindOneChainRejected(new Error('DB error')));
+    const res = mockRes();
+    const spy = jest.spyOn(console, 'error').mockImplementation();
+
+    await SupplierController.createSupplier(
+      mockReqBody({ name: 'X', phone: '1', email: 'x@x.com', address: 'X' }),
+      res
+    );
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json.mock.calls[0][0].message).toMatch(/Server error/i);
+    spy.mockRestore();
+  });
+
+  it('500 nếu Supplier.create ném lỗi không phải duplicate', async () => {
+    mockFindOne.mockReturnValue(makeFindOneChainResolved(null));
+    mockCreate.mockRejectedValue(new Error('Unexpected'));
+
+    const res = mockRes();
+    const spy = jest.spyOn(console, 'error').mockImplementation();
+
+    await SupplierController.createSupplier(
+      mockReqBody({ name: 'Y', phone: '1', email: 'y@y.com', address: 'X' }),
+      res
+    );
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    spy.mockRestore();
+  });
+
+  // ---- Cấu trúc DTO & normalize ----
+  it('đúng cấu trúc DTO trả về & normalize input', async () => {
+    mockFindOne.mockReturnValue(makeFindOneChainResolved({ code: 'SUP0010' }));
+    const created = {
+      _id: '507f1f77bcf86cd799439105',
+      code: 'SUP0011',
+      name: 'Z Pharma',
+      phone: '090',
+      email: 'z@z.vn',
+      address: '1 Main',
+      taxCode: '0312',
+      contactName: 'Mr. Z',
+      status: 'active',
+      ordersCount: 5,
+      lastOrderAt: new Date('2025-10-02T00:00:00Z'),
+      createdAt: new Date('2025-10-02T01:00:00Z')
+    };
+    mockCreate.mockResolvedValue(created);
+
+    const res = mockRes();
+    await SupplierController.createSupplier(
+      mockReqBody({
+        name: '  Z Pharma  ',
+        phone: ' 090 ',
+        email: ' Z@Z.VN ',
+        address: ' 1 Main ',
+        taxCode: ' 0312 ',
+        contactName: ' Mr. Z '
+      }),
+      res
+    );
+
+    // create được gọi với dữ liệu đã trim/lowercase email
+    expect(Supplier.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'Z Pharma',
+        phone: '090',
+        email: 'z@z.vn',
+        address: '1 Main',
+        taxCode: '0312',
+        contactName: 'Mr. Z'
+      })
+    );
+
+    const payload = res.json.mock.calls[0][0];
+    expect(payload.success).toBe(true);
+    expect(payload.data).toMatchObject({
+      id: '507f1f77bcf86cd799439105',
+      code: 'SUP0011',
+      name: 'Z Pharma',
+      address: '1 Main',
+      taxCode: '0312',
+      contactName: 'Mr. Z',
+      contact: { phone: '090', email: 'z@z.vn' },
+      orders: { count: 5, lastDate: created.lastOrderAt },
+      status: 'active'
+    });
+    expect(payload.data).toHaveProperty('createdAt');
+  });
+});
