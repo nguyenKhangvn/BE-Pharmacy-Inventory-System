@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { Category, Product } from "../models/index.js";
 import ApiResponse from "../utils/ApiResponse.js";
-
+import { nextCode } from "../utils/codegen.js";
 class CategoryController {
   // @desc    Get all categories with pagination
   // @route   GET /api/categories
