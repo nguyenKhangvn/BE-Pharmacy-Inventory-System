@@ -9,7 +9,7 @@ export const generateTestToken = (payload = {}) => {
   const defaultPayload = {
     id: "507f1f77bcf86cd799439011",
     email: "test@example.com",
-    role: "ADMIN",
+    role: "admin", // Change from ADMIN to admin
     organizationId: "507f1f77bcf86cd799439012",
     ...payload,
   };

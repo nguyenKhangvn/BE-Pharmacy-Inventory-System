@@ -45,11 +45,11 @@ router.get(
 
 // @route   POST /api/categories
 // @desc    Create new category
-// @access  Private (Admin/Manager)
+// @access  Private (Admin only)
 router.post(
   "/",
   auth,
-  roleAuth(["ADMIN", "MANAGER"]),
+  roleAuth(["admin"]),
   validateCreateCategory,
   checkValidation,
   CategoryController.createCategory
@@ -57,11 +57,11 @@ router.post(
 
 // @route   PUT /api/categories/:id
 // @desc    Update category
-// @access  Private (Admin/Manager)
+// @access  Private (Admin only)
 router.put(
   "/:id",
   auth,
-  roleAuth(["ADMIN", "MANAGER"]),
+  roleAuth(["admin"]),
   validateObjectId,
   validateUpdateCategory,
   checkValidation,
@@ -74,7 +74,7 @@ router.put(
 router.delete(
   "/:id",
   auth,
-  roleAuth(["ADMIN"]),
+  roleAuth(["admin"]),
   validateObjectId,
   checkValidation,
   CategoryController.deleteCategory
