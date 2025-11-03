@@ -235,9 +235,9 @@ describe('SupplierController.getSuppliers', () => {
     chain.lean.mockResolvedValue([]);
     mockCountDocuments.mockResolvedValue(0);
 
-    await SupplierController.getSuppliers(mockReq({ q: 'abc', status: 'inactive' }), mockRes());
+    await SupplierController.getSuppliers(mockReq({ q: 'abc', status: 'locked' }), mockRes());
     const query = mockFind.mock.calls[0][0];
-    expect(query.status).toBe('inactive');
+    expect(query.status).toBe('locked');
     expect(Array.isArray(query.$or)).toBe(true);
   });
 
@@ -274,7 +274,7 @@ describe('SupplierController.getSuppliers', () => {
         code: 'SUP0002',
         name: 'No Optional Co.',
         // thiếu address, taxCode, contactName, phone, email, ordersCount, lastOrderAt
-        status: 'inactive',
+        status: 'locked',
         createdAt: new Date('2025-09-30T00:00:00Z')
       }
     ];
@@ -294,7 +294,7 @@ describe('SupplierController.getSuppliers', () => {
       contactName: '',
       contact: { phone: '', email: '' },
       orders: { count: 0, lastDate: null },
-      status: 'inactive'
+      status: 'locked'
     });
     expect(typeof dto.id).toBe('string');
   });
@@ -519,7 +519,7 @@ describe('SupplierController.createSupplier', () => {
     expect(Supplier.create).toHaveBeenCalledWith(expect.objectContaining({ status: 'active' }));
   });
 
-  it('status hợp lệ "inactive" được giữ nguyên', async () => {
+  it('status hợp lệ "locked" được giữ nguyên', async () => {
     mockFindOne.mockReturnValue(makeFindOneChainResolved({ code: 'SUP0001' }));
     mockCreate.mockResolvedValue({
       _id: '507f1f77bcf86cd799439103',
@@ -528,16 +528,16 @@ describe('SupplierController.createSupplier', () => {
       phone: '1',
       email: 'd@d.com',
       address: 'X',
-      status: 'inactive',
+      status: 'locked',
       createdAt: new Date()
     });
 
     const res = mockRes();
     await SupplierController.createSupplier(
-      mockReqBody({ name: 'D', phone: '1', email: 'd@d.com', address: 'X', status: 'inactive' }),
+      mockReqBody({ name: 'D', phone: '1', email: 'd@d.com', address: 'X', status: 'locked' }),
       res
     );
-    expect(Supplier.create).toHaveBeenCalledWith(expect.objectContaining({ status: 'inactive' }));
+    expect(Supplier.create).toHaveBeenCalledWith(expect.objectContaining({ status: 'locked' }));
   });
 
   // ---- Retry khi trùng mã (duplicate key) ----
@@ -826,7 +826,7 @@ describe('SupplierController.updateSupplier', () => {
         address: 'New Addr',
         taxCode: '099',
         contactName: 'New Contact',
-        status: 'inactive'
+        status: 'locked'
       }),
       res
     );
@@ -847,7 +847,7 @@ describe('SupplierController.updateSupplier', () => {
       taxCode: '099',
       contactName: 'New Contact',
       contact: { phone: '091', email: 'new@sup.vn' }, // normalize email lower-case
-      status: 'inactive',
+      status: 'locked',
       orders: { count: 5, lastDate: new Date('2025-10-01T00:00:00Z') }
     });
   });
@@ -872,7 +872,7 @@ describe('SupplierController.updateSupplier', () => {
 
     const res = mockResObj();
     await SupplierController.updateSupplier(
-      mockReqPut('507f1f77bcf86cd799439205', { status: 'inactive' }),
+      mockReqPut('507f1f77bcf86cd799439205', { status: 'locked' }),
       res
     );
 
@@ -880,7 +880,7 @@ describe('SupplierController.updateSupplier', () => {
     expect(doc.email).toBe('keep@sup.vn');
     expect(res.status).toHaveBeenCalledWith(200);
     const payload = res.json.mock.calls[0][0];
-    expect(payload.data.status).toBe('inactive');
+    expect(payload.data.status).toBe('locked');
   });
 
   it('500 khi save ném lỗi', async () => {
