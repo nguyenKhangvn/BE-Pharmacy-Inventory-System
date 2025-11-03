@@ -253,6 +253,134 @@ class SupplierController {
       return ApiResponse.error(res, "Server error", 500);
     }
   }
+
+  // @desc    Update supplier
+  // @route   PUT /api/suppliers/:id
+  // @access  Private (admin)
+  static async updateSupplier(req, res) {
+    try {
+      const { id } = req.params;
+
+      // Validate ObjectId format
+      if (!id || !id.match(/^[0-9a-fA-F]{24}$/)) {
+        return ApiResponse.error(res, "ID nhà cung cấp không hợp lệ", 400);
+      }
+
+      // Tìm supplier
+      const supplier = await Supplier.findById(id);
+      if (!supplier) {
+        return ApiResponse.error(res, "Không tìm thấy nhà cung cấp", 404);
+      }
+
+      const {
+        name,
+        phone,
+        email,
+        address,
+        taxCode,
+        contactName,
+        status,
+      } = req.body || {};
+
+      // --- Chuẩn hoá và validate ---
+      
+      // Nếu có email, validate format
+      if (email !== undefined) {
+        const emailTrimmed = (email || "").trim().toLowerCase();
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(emailTrimmed)) {
+          return ApiResponse.error(res, "Email không đúng định dạng", 400);
+        }
+        supplier.email = emailTrimmed;
+      }
+
+      // Nếu có status, validate
+      if (status !== undefined) {
+        if (!ALLOWED_STATUS.includes(status)) {
+          return ApiResponse.error(
+            res,
+            `status không hợp lệ. Chỉ chấp nhận: ${ALLOWED_STATUS.join(", ")}`,
+            400
+          );
+        }
+        supplier.status = status;
+      }
+
+      // Cập nhật các fields khác nếu có
+      if (name !== undefined) {
+        const nameTrimmed = (name || "").trim();
+        supplier.name = nameTrimmed;
+      }
+
+      if (phone !== undefined) {
+        const phoneTrimmed = (phone || "").trim();
+        supplier.phone = phoneTrimmed;
+      }
+
+      if (address !== undefined) {
+        const addressTrimmed = (address || "").trim();
+        supplier.address = addressTrimmed;
+      }
+
+      if (taxCode !== undefined) {
+        supplier.taxCode = (taxCode || "").trim();
+      }
+
+      if (contactName !== undefined) {
+        supplier.contactName = (contactName || "").trim();
+      }
+
+      // Validate required fields sau khi update
+      if (
+        !supplier.name ||
+        !supplier.phone ||
+        !supplier.email ||
+        !supplier.address
+      ) {
+        return ApiResponse.error(
+          res,
+          "name, phone, email, address là bắt buộc",
+          400
+        );
+      }
+
+      // Code không được phép thay đổi (bỏ qua nếu có trong body)
+      // supplier.code sẽ không bị thay đổi
+
+      // Lưu thay đổi
+      await supplier.save();
+
+      // --- Map sang DTO ---
+      const data = {
+        id: String(supplier._id),
+        code: supplier.code,
+        name: supplier.name,
+        address: supplier.address || "",
+        taxCode: supplier.taxCode || "",
+        contactName: supplier.contactName || "",
+        contact: {
+          phone: supplier.phone || "",
+          email: supplier.email || "",
+        },
+        orders: {
+          count: supplier.ordersCount || 0,
+          lastDate: supplier.lastOrderAt || null,
+        },
+        status: supplier.status,
+        updatedAt: supplier.updatedAt,
+      };
+
+      return ApiResponse.success(
+        res,
+        data,
+        "Cập nhật thông tin thành công",
+        200
+      );
+    } catch (error) {
+      console.error("Update supplier error:", error);
+      return ApiResponse.error(res, "Server error", 500);
+    }
+  }
 }
 
 export default SupplierController;
