@@ -8,9 +8,11 @@ class CategoryController {
   // @access  Private
   static async getCategories(req, res) {
     try {
-      const { page = 1, limit = 10, search, isActive } = req.query;
+      const { search, isActive } = req.query;
+      const page = Number(req.query.page ?? 1);
+      const limit = Number(req.query.limit ?? 10);
+      const skip = (page - 1) * limit;
 
-      // Build filter
       const filter = {};
       if (isActive !== undefined) filter.isActive = isActive === "true";
       if (search) {
@@ -21,10 +23,6 @@ class CategoryController {
         ];
       }
 
-      // Calculate pagination
-      const skip = (page - 1) * limit;
-
-      // Get categories with product count
       const categories = await Category.aggregate([
         { $match: filter },
         {
@@ -35,38 +33,22 @@ class CategoryController {
             as: "products",
           },
         },
-        {
-          $addFields: {
-            productCount: { $size: "$products" },
-          },
-        },
-        {
-          $project: {
-            products: 0,
-          },
-        },
+        { $addFields: { productCount: { $size: "$products" } } },
+        { $project: { products: 0 } },
         { $sort: { createdAt: -1 } },
         { $skip: skip },
-        { $limit: parseInt(limit) },
+        { $limit: limit },
       ]);
 
       const total = await Category.countDocuments(filter);
-
-      const pagination = {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / limit),
-      };
-
       return ApiResponse.paginated(
         res,
         categories,
-        pagination,
+        { page, limit, total, pages: Math.ceil(total / limit) },
         "Categories retrieved successfully"
       );
-    } catch (error) {
-      console.error("Get categories error:", error);
+    } catch (e) {
+      console.error("Get categories error:", e);
       return ApiResponse.error(res, "Server error", 500);
     }
   }
@@ -123,6 +105,9 @@ class CategoryController {
   static async getCategoryById(req, res) {
     try {
       const { id } = req.params;
+      if (!mongoose.isValidObjectId(id)) {
+        return ApiResponse.error(res, "Validation failed", 400);
+      }
 
       const categoryData = await Category.aggregate([
         { $match: { _id: new mongoose.Types.ObjectId(id) } },
@@ -134,29 +119,20 @@ class CategoryController {
             as: "products",
           },
         },
-        {
-          $addFields: {
-            productCount: { $size: "$products" },
-          },
-        },
-        {
-          $project: {
-            products: 0,
-          },
-        },
+        { $addFields: { productCount: { $size: "$products" } } },
+        { $project: { products: 0 } },
       ]);
 
-      if (!categoryData || categoryData.length === 0) {
+      if (!categoryData.length)
         return ApiResponse.error(res, "Category not found", 404);
-      }
 
       return ApiResponse.success(
         res,
         categoryData[0],
         "Category retrieved successfully"
       );
-    } catch (error) {
-      console.error("Get category error:", error);
+    } catch (e) {
+      console.error("Get category error:", e);
       return ApiResponse.error(res, "Server error", 500);
     }
   }
@@ -166,22 +142,36 @@ class CategoryController {
   // @access  Private (Admin/Manager)
   static async createCategory(req, res) {
     try {
-      const { code, name, description, isActive } = req.body;
+      let { code, name, description, isActive } = req.body;
 
-      // Check if category with same name already exists
-      const existingCategory = await Category.findOne({
-        $or: [{ name }, { code }],
+      if (!name || !name.trim()) {
+        return ApiResponse.error(res, "Validation failed", 400, {
+          name: "Name is required",
+        });
+      }
+      if (isActive !== undefined && typeof isActive !== "boolean") {
+        return ApiResponse.error(res, "Validation failed", 400, {
+          isActive: "isActive must be boolean",
+        });
+      }
+
+      if (!code) {
+        code = await nextCode("CAT", 4);
+      }
+
+      // Check trùng name/code
+      const existing = await Category.findOne({
+        $or: [{ name: name.trim() }, { code }],
       });
-
-      if (existingCategory) {
-        if (existingCategory.name === name) {
+      if (existing) {
+        if (existing.name === name.trim()) {
           return ApiResponse.error(
             res,
             "Category with this name already exists",
             400
           );
         }
-        if (existingCategory.code === code) {
+        if (existing.code === code) {
           return ApiResponse.error(
             res,
             "Category with this code already exists",
@@ -190,29 +180,26 @@ class CategoryController {
         }
       }
 
-      const category = new Category({
+      const category = await Category.create({
         code,
-        name,
+        name: name.trim(),
         description,
-        isActive,
+        isActive: isActive ?? true,
       });
 
-      await category.save();
-
-      // Add productCount field
-      const categoryResponse = category.toObject();
-      categoryResponse.productCount = 0;
+      const dto = category.toObject();
+      dto.productCount = 0;
 
       return ApiResponse.success(
         res,
-        categoryResponse,
+        dto,
         "Category created successfully",
         201
       );
     } catch (error) {
       console.error("Create category error:", error);
-      if (error.code === 11000) {
-        const field = Object.keys(error.keyPattern)[0];
+      if (error?.code === 11000) {
+        const field = Object.keys(error.keyPattern || {})[0] || "field";
         return ApiResponse.error(
           res,
           `Category with this ${field} already exists`,
@@ -229,41 +216,44 @@ class CategoryController {
   static async updateCategory(req, res) {
     try {
       const { id } = req.params;
+      if (!mongoose.isValidObjectId(id)) {
+        return ApiResponse.error(res, "Validation failed", 400);
+      }
+
       const { code, name, description, isActive } = req.body;
 
       const category = await Category.findById(id);
-      if (!category) {
-        return ApiResponse.error(res, "Category not found", 404);
+      if (!category) return ApiResponse.error(res, "Category not found", 404);
+
+      if (isActive !== undefined && typeof isActive !== "boolean") {
+        return ApiResponse.error(res, "Validation failed", 400, {
+          isActive: "isActive must be boolean",
+        });
       }
 
-      // Check if new name/code conflicts with existing category
       if (name || code) {
-        const query = { _id: { $ne: id } };
-        const orConditions = [];
-        if (name) orConditions.push({ name });
-        if (code) orConditions.push({ code });
-        query.$or = orConditions;
-
-        const existingCategory = await Category.findOne(query);
-        if (existingCategory) {
-          if (existingCategory.name === name) {
-            return ApiResponse.error(
-              res,
-              "Category with this name already exists",
-              400
-            );
-          }
-          if (existingCategory.code === code) {
-            return ApiResponse.error(
-              res,
-              "Category with this code already exists",
-              400
-            );
+        const or = [];
+        if (name) or.push({ name });
+        if (code) or.push({ code });
+        if (or.length) {
+          const dup = await Category.findOne({ _id: { $ne: id }, $or: or });
+          if (dup) {
+            if (name && dup.name === name)
+              return ApiResponse.error(
+                res,
+                "Category with this name already exists",
+                400
+              );
+            if (code && dup.code === code)
+              return ApiResponse.error(
+                res,
+                "Category with this code already exists",
+                400
+              );
           }
         }
       }
 
-      // Update fields
       if (code) category.code = code;
       if (name) category.name = name;
       if (description !== undefined) category.description = description;
@@ -271,23 +261,17 @@ class CategoryController {
 
       await category.save();
 
-      // Get product count
       const productCount = await Product.countDocuments({
         categoryId: category._id,
       });
+      const dto = category.toObject();
+      dto.productCount = productCount;
 
-      const categoryResponse = category.toObject();
-      categoryResponse.productCount = productCount;
-
-      return ApiResponse.success(
-        res,
-        categoryResponse,
-        "Category updated successfully"
-      );
-    } catch (error) {
-      console.error("Update category error:", error);
-      if (error.code === 11000) {
-        const field = Object.keys(error.keyPattern)[0];
+      return ApiResponse.success(res, dto, "Category updated successfully");
+    } catch (e) {
+      console.error("Update category error:", e);
+      if (e?.code === 11000) {
+        const field = Object.keys(e.keyPattern || {})[0] || "field";
         return ApiResponse.error(
           res,
           `Category with this ${field} already exists`,
