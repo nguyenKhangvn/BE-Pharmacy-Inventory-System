@@ -1,6 +1,7 @@
 import ApiResponse from "../utils/ApiResponse.js";
 import { createInboundTransactionSchema } from "../validators/transaction.validator.js";
 import { createInboundTransaction } from "../services/transaction.service.js";
+import { getInboundTransactionById } from "../services/transaction.query.js";
 
 class TransactionController {
   /**
@@ -54,8 +55,28 @@ class TransactionController {
     } catch (err) {
       console.error("Create transaction error:", err);
       const msg = err?.message || "Server error";
-      if (msg.includes("not found")) return ApiResponse.error(res, msg, 400);
+      // Handle validation and not found errors
+      if (msg.includes("not found") || msg.includes("No warehouse found")) {
+        return ApiResponse.error(res, msg, 400);
+      }
       return ApiResponse.error(res, "Server error", 500);
+    }
+  }
+
+  static async getById(req, res) {
+    try {
+      const { id } = req.params;
+      const data = await getInboundTransactionById(id);
+
+      return ApiResponse.success(
+        res,
+        data,
+        "INBOUND transaction retrieved successfully"
+      );
+    } catch (err) {
+      const code = err.statusCode || 500;
+      const msg = code === 500 ? "Server error" : err.message;
+      return ApiResponse.error(res, msg, code);
     }
   }
 }

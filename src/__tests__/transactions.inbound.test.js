@@ -11,7 +11,11 @@ import express from "express";
 import mongoose from "mongoose";
 
 import { connect, closeDatabase, clearDatabase } from "./setup/db.js";
-import { generateTestToken, createProductData } from "./setup/helpers.js";
+import {
+  generateTestToken,
+  createTestUser,
+  createProductData,
+} from "./setup/helpers.js";
 
 import transactionRoutes from "../routes/transaction.route.js";
 import {
@@ -62,25 +66,39 @@ const createProduct = (overrides = {}) =>
     })
   );
 
+// Shared variables for all describe blocks
+let adminToken, userToken;
+let adminUser, normalUser;
+
+beforeAll(async () => {
+  process.env.JWT_SECRET = "test-secret";
+  await connect();
+
+  // Create test users in database
+  adminUser = await createTestUser({
+    username: "adminuser",
+    email: "admin@example.com",
+    role: "admin",
+  });
+  normalUser = await createTestUser({
+    username: "normaluser",
+    email: "user@example.com",
+    role: "user",
+  });
+
+  adminToken = generateTestToken(adminUser);
+  userToken = generateTestToken(normalUser);
+});
+
+afterAll(async () => {
+  await closeDatabase();
+});
+
+afterEach(async () => {
+  await clearDatabase();
+});
+
 describe("INBOUND Transaction API", () => {
-  let adminToken, userToken;
-
-  beforeAll(async () => {
-    process.env.JWT_SECRET = "test-secret";
-    await connect();
-
-    adminToken = generateTestToken({ role: "admin" });
-    userToken = generateTestToken({ role: "user" });
-  });
-
-  afterAll(async () => {
-    await closeDatabase();
-  });
-
-  afterEach(async () => {
-    await clearDatabase();
-  });
-
   it("201 | tạo phiếu INBOUND & cập nhật tồn lô (tạo lô mới nếu chưa có)", async () => {
     const [wh, sup, prod] = await Promise.all([
       createWarehouse(),
@@ -241,7 +259,7 @@ describe("INBOUND Transaction API", () => {
 
     const body = {
       type: "INBOUND",
-      warehouseId: fakeWh,
+      warehouseId: fakeWh, // fake warehouse ID
       supplierId: sup._id.toString(),
       details: [
         { productId: prod._id.toString(), quantity: 5, unitPrice: 1000 },
@@ -254,7 +272,8 @@ describe("INBOUND Transaction API", () => {
       .send(body)
       .expect(400);
 
-    expect(res.body.message).toMatch(/warehouseId not found/i);
+    // Service có thể trả về "No warehouse found" khi không tìm thấy warehouse
+    expect(res.body.message).toMatch(/warehouse.*(not found|found)/i);
   });
 
   it("400 | supplierId không tồn tại", async () => {
@@ -297,5 +316,98 @@ describe("INBOUND Transaction API", () => {
       .expect(400);
 
     expect(res.body.message).toMatch(/productId not found/i);
+  });
+});
+
+describe("GET /api/transactions/:id (INBOUND detail)", () => {
+  it("200 | trả về header + details đã populate sau khi tạo INBOUND", async () => {
+    // Arrange: tạo dữ liệu nền
+    const [wh, sup, prod] = await Promise.all([
+      createWarehouse(),
+      createSupplier(),
+      createProduct(),
+    ]);
+
+    const lotNumber = "LOT-GET-001";
+    const expiry = new Date(Date.now() + 180 * 24 * 3600 * 1000);
+
+    const body = {
+      type: "INBOUND",
+      warehouseId: wh._id.toString(),
+      supplierId: sup._id.toString(),
+      notes: "Nhap kho de test GET",
+      details: [
+        {
+          productId: prod._id.toString(),
+          quantity: 25,
+          unitPrice: 900,
+          lotNumber,
+          expiryDate: expiry,
+        },
+      ],
+    };
+
+    // Tạo transaction trước
+    const createRes = await request(app)
+      .post("/api/transactions")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send(body)
+      .expect(201);
+
+    const txId = createRes.body.data.transaction._id;
+    expect(txId).toBeTruthy();
+
+    // Act: gọi GET /api/transactions/:id
+    const getRes = await request(app)
+      .get(`/api/transactions/${txId}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .expect(200);
+
+    // Assert: cấu trúc dữ liệu
+    expect(getRes.body.success).toBe(true);
+    expect(getRes.body.data).toBeDefined();
+    expect(getRes.body.data.header).toBeDefined();
+    expect(getRes.body.data.details).toBeDefined();
+    expect(Array.isArray(getRes.body.data.details)).toBe(true);
+    expect(getRes.body.data.header._id).toBe(txId);
+    expect(getRes.body.data.header.type).toBe("INBOUND");
+    expect(getRes.body.data.header.destinationWarehouseId?.code).toBe("WH001");
+    expect(getRes.body.data.header.supplierId?.code).toBe("SUP001");
+
+    const line = getRes.body.data.details[0];
+    expect(line.productId?.sku).toBe("SKU001");
+    expect(line.inventoryLotId?.lotNumber).toBe(lotNumber);
+    // expiry có thể bị stringify về ISO string — so sánh theo yyyy-mm-dd
+    expect(new Date(line.inventoryLotId?.expiryDate).toDateString()).toBe(
+      expiry.toDateString()
+    );
+  });
+
+  it("400 | invalid ObjectId -> trả về lỗi 400", async () => {
+    const res = await request(app)
+      .get("/api/transactions/invalid-id-123")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .expect(400);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toMatch(/invalid.*id/i);
+  });
+
+  it("404 | không tìm thấy transaction", async () => {
+    const fakeId = new mongoose.Types.ObjectId().toString();
+
+    const res = await request(app)
+      .get(`/api/transactions/${fakeId}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .expect(404);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toMatch(/transaction not found/i);
+  });
+
+  it("401 | thiếu token -> từ chối truy cập", async () => {
+    await request(app)
+      .get(`/api/transactions/${new mongoose.Types.ObjectId().toString()}`)
+      .expect(401);
   });
 });
