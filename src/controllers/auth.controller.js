@@ -11,7 +11,11 @@ class AuthController {
       const { username, password } = req.body;
 
       if (!username || !password) {
-        return ApiResponse.error(res, "Please enter both username and password", 400);
+        return ApiResponse.error(
+          res,
+          "Please enter both username and password",
+          400
+        );
       }
 
       const user = await User.findOne({ username });
@@ -20,7 +24,11 @@ class AuthController {
       }
 
       if (user.status === "locked") {
-        return ApiResponse.error(res, "Account is locked. Please contact admin.", 403);
+        return ApiResponse.error(
+          res,
+          "Account is locked. Please contact admin.",
+          403
+        );
       }
 
       const isPasswordValid = await user.comparePassword(password);
@@ -33,7 +41,7 @@ class AuthController {
 
       const token = jwt.sign(
         {
-          userId: user._id,
+          id: user._id,
           username: user.username,
           role: user.role,
         },
@@ -69,11 +77,19 @@ class AuthController {
       const { username, password, email, fullName, phone, role } = req.body;
 
       if (!username || !password || !email) {
-        return ApiResponse.error(res, "Please enter username, password and email", 400);
+        return ApiResponse.error(
+          res,
+          "Please enter username, password and email",
+          400
+        );
       }
 
       if (password.length < 6) {
-        return ApiResponse.error(res, "Password must be at least 6 characters", 400);
+        return ApiResponse.error(
+          res,
+          "Password must be at least 6 characters",
+          400
+        );
       }
 
       const existingUser = await User.findOne({ username });
