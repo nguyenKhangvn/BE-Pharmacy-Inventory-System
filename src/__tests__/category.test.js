@@ -12,6 +12,7 @@ import mongoose from "mongoose";
 import { connect, closeDatabase, clearDatabase } from "./setup/db.js";
 import {
   generateTestToken,
+  createTestUser,
   createCategoryData,
   createProductData,
 } from "./setup/helpers.js";
@@ -26,6 +27,8 @@ app.use("/api/categories", categoryRoutes);
 describe("Category API Tests", () => {
   let adminToken;
   let userToken;
+  let adminUser;
+  let normalUser;
 
   beforeAll(async () => {
     // Set JWT_SECRET for testing environment
@@ -33,9 +36,21 @@ describe("Category API Tests", () => {
 
     await connect();
 
+    // Create test users in database
+    adminUser = await createTestUser({
+      username: "adminuser",
+      email: "admin@example.com",
+      role: "admin",
+    });
+    normalUser = await createTestUser({
+      username: "normaluser",
+      email: "user@example.com",
+      role: "user",
+    });
+
     // Generate tokens for different roles
-    adminToken = generateTestToken({ role: "admin" });
-    userToken = generateTestToken({ role: "user" });
+    adminToken = generateTestToken(adminUser);
+    userToken = generateTestToken(normalUser);
   });
 
   afterAll(async () => {

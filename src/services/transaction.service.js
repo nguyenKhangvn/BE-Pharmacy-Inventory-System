@@ -88,6 +88,7 @@ export async function createInboundTransaction(payload, actor) {
               unit: row.unit || "unit",
               description: row.description || "",
               currentStock: row.quantity,
+              categoryId: row.categoryId || null,
               isActive: true,
             },
           ],

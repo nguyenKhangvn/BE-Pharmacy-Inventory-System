@@ -12,4 +12,11 @@ router.post(
   TransactionController.create
 );
 
+router.get(
+  "/:id",
+  auth,
+  roleAuth(["admin", "user"]),
+  TransactionController.getById
+);
+
 export default router;
