@@ -1,108 +1,45 @@
-import AuthService from "../services/authService.js";
-import { User } from "../models/index.js";
+import jwt from "jsonwebtoken";
+import User from "../models/user.model.js";
 import ApiResponse from "../utils/ApiResponse.js";
 
 class AuthController {
-  // @desc    Register user
-  // @route   POST /api/auth/register
-  // @access  Public
-  static async register(req, res) {
-    try {
-      const { organizationId, fullName, email, password, role } = req.body;
-
-      // Check if user already exists
-      const existingUser = await User.findOne({
-        $or: [{ email }],
-      });
-
-      if (existingUser) {
-        return ApiResponse.error(
-          res,
-          "User already exists with this email",
-          400
-        );
-      }
-
-      // Hash password
-      const hashedPassword = await AuthService.hashPassword(password);
-
-      // Create user
-      const user = new User({
-        organizationId,
-        fullName,
-        email,
-        hashedPassword,
-        role: role || "PHARMACIST",
-      });
-
-      await user.save();
-
-      // Generate token
-      const token = AuthService.generateToken({
-        id: user._id,
-        email: user.email,
-        role: user.role,
-        organizationId: user.organizationId,
-      });
-
-      return ApiResponse.success(
-        res,
-        {
-          token,
-          user: {
-            id: user._id,
-            fullName: user.fullName,
-            email: user.email,
-            role: user.role,
-            organizationId: user.organizationId,
-          },
-        },
-        "User registered successfully",
-        201
-      );
-    } catch (error) {
-      console.error("Register error:", error);
-      return ApiResponse.error(res, "Server error", 500);
-    }
-  }
-
   // @desc    Login user
   // @route   POST /api/auth/login
   // @access  Public
   static async login(req, res) {
     try {
-      const { email, password } = req.body;
+      const { username, password } = req.body;
 
-      // Find user and include password
-      const user = await User.findOne({ email }).select("+hashedPassword");
+      if (!username || !password) {
+        return ApiResponse.error(res, "Please enter both username and password", 400);
+      }
+
+      const user = await User.findOne({ username });
       if (!user) {
-        return ApiResponse.error(res, "Invalid credentials", 400);
+        return ApiResponse.error(res, "Invalid username or password", 401);
       }
 
-      // Check password
-      const isMatch = await AuthService.comparePassword(
-        password,
-        user.hashedPassword
+      if (user.status === "locked") {
+        return ApiResponse.error(res, "Account is locked. Please contact admin.", 403);
+      }
+
+      const isPasswordValid = await user.comparePassword(password);
+      if (!isPasswordValid) {
+        return ApiResponse.error(res, "Invalid username or password", 401);
+      }
+
+      user.lastLogin = Date.now();
+      await user.save();
+
+      const token = jwt.sign(
+        {
+          userId: user._id,
+          username: user.username,
+          role: user.role,
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: process.env.JWT_EXPIRE || "7d" }
       );
-      if (!isMatch) {
-        return ApiResponse.error(res, "Invalid credentials", 400);
-      }
-
-      // Check if user is active
-      if (!user.isActive) {
-        return ApiResponse.error(res, "Account is deactivated", 400);
-      }
-
-      // Update last login
-      await user.updateLastLogin();
-
-      // Generate token
-      const token = AuthService.generateToken({
-        id: user._id,
-        email: user.email,
-        role: user.role,
-        organizationId: user.organizationId,
-      });
 
       return ApiResponse.success(
         res,
@@ -110,14 +47,13 @@ class AuthController {
           token,
           user: {
             id: user._id,
-            fullName: user.fullName,
+            username: user.username,
             email: user.email,
             role: user.role,
-            organizationId: user.organizationId,
-            lastLoginAt: user.lastLoginAt,
           },
         },
-        "Login successful"
+        "Login successful",
+        200
       );
     } catch (error) {
       console.error("Login error:", error);
@@ -125,87 +61,67 @@ class AuthController {
     }
   }
 
-  // @desc    Get current user
-  // @route   GET /api/auth/me
-  // @access  Private
-  static async getMe(req, res) {
+  // @desc    Register user
+  // @route   POST /api/auth/register
+  // @access  Public
+  static async register(req, res) {
     try {
-      const user = await User.findById(req.user.id).populate(
-        "organization",
-        "name code address phone"
-      );
+      const { username, password, email, fullName, phone, role } = req.body;
 
-      if (!user) {
-        return ApiResponse.error(res, "User not found", 404);
+      if (!username || !password || !email) {
+        return ApiResponse.error(res, "Please enter username, password and email", 400);
       }
+
+      if (password.length < 6) {
+        return ApiResponse.error(res, "Password must be at least 6 characters", 400);
+      }
+
+      const existingUser = await User.findOne({ username });
+      if (existingUser) {
+        return ApiResponse.error(res, "Username already exists", 409);
+      }
+
+      const existingEmail = await User.findOne({ email });
+      if (existingEmail) {
+        return ApiResponse.error(res, "Email already exists", 409);
+      }
+
+      const newUser = await User.create({
+        username,
+        password,
+        email,
+        fullName: fullName || username,
+        phone: phone || "",
+        role: role || "user",
+      });
+
+      const token = jwt.sign(
+        {
+          userId: newUser._id,
+          username: newUser.username,
+          role: newUser.role,
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: process.env.JWT_EXPIRE }
+      );
 
       return ApiResponse.success(
         res,
-        user,
-        "User profile retrieved successfully"
+        {
+          token,
+          user: {
+            id: newUser._id,
+            username: newUser.username,
+            email: newUser.email,
+            fullName: newUser.fullName,
+            role: newUser.role,
+          },
+        },
+        "Registration successful",
+        201
       );
     } catch (error) {
-      console.error("Get user error:", error);
-      return ApiResponse.error(res, "Server error", 500);
-    }
-  }
-
-  // @desc    Update user profile
-  // @route   PUT /api/auth/profile
-  // @access  Private
-  static async updateProfile(req, res) {
-    try {
-      const { fullName } = req.body;
-      const userId = req.user.id;
-
-      const user = await User.findById(userId);
-      if (!user) {
-        return ApiResponse.error(res, "User not found", 404);
-      }
-
-      // Update fields
-      if (fullName) user.fullName = fullName;
-
-      await user.save();
-
-      return ApiResponse.success(res, user, "Profile updated successfully");
-    } catch (error) {
-      console.error("Update profile error:", error);
-      return ApiResponse.error(res, "Server error", 500);
-    }
-  }
-
-  // @desc    Change password
-  // @route   PUT /api/auth/change-password
-  // @access  Private
-  static async changePassword(req, res) {
-    try {
-      const { currentPassword, newPassword } = req.body;
-      const userId = req.user.id;
-
-      const user = await User.findById(userId).select("+hashedPassword");
-      if (!user) {
-        return ApiResponse.error(res, "User not found", 404);
-      }
-
-      // Verify current password
-      const isMatch = await AuthService.comparePassword(
-        currentPassword,
-        user.hashedPassword
-      );
-      if (!isMatch) {
-        return ApiResponse.error(res, "Current password is incorrect", 400);
-      }
-
-      // Hash new password
-      const hashedPassword = await AuthService.hashPassword(newPassword);
-      user.hashedPassword = hashedPassword;
-
-      await user.save();
-
-      return ApiResponse.success(res, null, "Password changed successfully");
-    } catch (error) {
-      console.error("Change password error:", error);
+      console.error("Register error:", error);
       return ApiResponse.error(res, "Server error", 500);
     }
   }

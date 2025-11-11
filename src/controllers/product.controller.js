@@ -77,7 +77,7 @@ class ProductController {
 
   // @desc    Create new product
   // @route   POST /api/products
-  // @access  Private (Admin/Manager)
+  // @access  Private (admin)
   static async createProduct(req, res) {
     try {
       const { sku, name, description, activeIngredient, unit, minimumStock } =
@@ -113,7 +113,7 @@ class ProductController {
 
   // @desc    Update product
   // @route   PUT /api/products/:id
-  // @access  Private (Admin/Manager)
+  // @access  Private (admin)
   static async updateProduct(req, res) {
     try {
       const { id } = req.params;
@@ -156,7 +156,7 @@ class ProductController {
 
   // @desc    Delete product (soft delete)
   // @route   DELETE /api/products/:id
-  // @access  Private (Admin only)
+  // @access  Private (admin only)
   static async deleteProduct(req, res) {
     try {
       const { id } = req.params;

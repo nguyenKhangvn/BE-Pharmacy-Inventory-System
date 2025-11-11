@@ -41,11 +41,11 @@ router.get(
 
 // @route   POST /api/products
 // @desc    Create new product
-// @access  Private (Admin/Manager)
+// @access  Private (admin)
 router.post(
   "/",
   auth,
-  roleAuth(["ADMIN", "MANAGER"]),
+  roleAuth(["admin"]),
   validateCreateProduct,
   checkValidation,
   ProductController.createProduct
@@ -53,11 +53,11 @@ router.post(
 
 // @route   PUT /api/products/:id
 // @desc    Update product
-// @access  Private (Admin/Manager)
+// @access  Private (admin)
 router.put(
   "/:id",
   auth,
-  roleAuth(["ADMIN", "MANAGER"]),
+  roleAuth(["admin"]),
   validateObjectId,
   validateUpdateProduct,
   checkValidation,
@@ -66,11 +66,11 @@ router.put(
 
 // @route   DELETE /api/products/:id
 // @desc    Delete product (soft delete)
-// @access  Private (Admin only)
+// @access  Private (admin only)
 router.delete(
   "/:id",
   auth,
-  roleAuth(["ADMIN"]),
+  roleAuth(["admin"]),
   validateObjectId,
   checkValidation,
   ProductController.deleteProduct
