@@ -1,12 +1,62 @@
 import { jest } from "@jest/globals";
-import { getStockSummary, getTrends, getStatusDistribution } from "../../controllers/report.controller.js";
+// Import dependencies
 import Transaction from "../../models/transaction.model.js";
 import TransactionDetail from "../../models/transactionDetail.model.js";
 import Product from "../../models/product.model.js";
 import ApiResponse from "../../utils/ApiResponse.js";
 import mongoose from "mongoose";
 
-// Mock models
+// 1. Define a standalone mock function for fs.existsSync
+const mockExistsSync = jest.fn();
+
+// 2. Manually mock the 'fs' module using a factory
+jest.unstable_mockModule("fs", () => ({
+  default: {
+    existsSync: mockExistsSync,
+    // Add other fs methods here if needed, e.g., readFileSync: jest.fn()
+  },
+  existsSync: mockExistsSync, // Named export support
+}));
+
+// 3. Import the mocked 'fs' module dynamically
+// This is crucial for ESM mocking to work correctly with jest.unstable_mockModule
+const fs = await import("fs");
+
+// 4. Define mockDoc before mocking pdfkit
+const mockDoc = {
+  pipe: jest.fn().mockReturnThis(),
+  font: jest.fn().mockReturnThis(),
+  fontSize: jest.fn().mockReturnThis(),
+  text: jest.fn().mockReturnThis(),
+  moveDown: jest.fn().mockReturnThis(),
+  fillColor: jest.fn().mockReturnThis(),
+  rect: jest.fn().mockReturnThis(),
+  fill: jest.fn().mockReturnThis(),
+  moveTo: jest.fn().mockReturnThis(),
+  lineTo: jest.fn().mockReturnThis(),
+  lineWidth: jest.fn().mockReturnThis(),
+  strokeColor: jest.fn().mockReturnThis(),
+  stroke: jest.fn().mockReturnThis(),
+  addPage: jest.fn().mockReturnThis(),
+  switchToPage: jest.fn().mockReturnThis(),
+  registerFont: jest.fn().mockReturnThis(),
+  end: jest.fn(),
+  y: 100,
+  page: { height: 842, width: 595 },
+  bufferedPageRange: jest.fn().mockReturnValue({ count: 1 }),
+  _currentFont: "Helvetica",
+};
+
+// 5. Mock 'pdfkit' module
+jest.unstable_mockModule("pdfkit", () => ({
+  default: jest.fn().mockImplementation(() => mockDoc),
+}));
+
+// 6. Import the controller and PDFDocument AFTER mocking
+const { exportReport, getStockSummary, getTrends, getStatusDistribution } = await import("../../controllers/report.controller.js");
+const PDFDocument = (await import("pdfkit")).default;
+
+// Mock Models (Standard Jest Mocking)
 jest.mock("../../models/transaction.model.js");
 jest.mock("../../models/transactionDetail.model.js");
 jest.mock("../../models/product.model.js");
@@ -1521,6 +1571,534 @@ describe("Report Controller - getStatusDistribution", () => {
         "Lấy phân bổ trạng thái thành công",
         200
       );
+    });
+  });
+});
+
+describe("Report Controller - exportReport", () => {
+  let req, res;
+
+  beforeEach(() => {
+    req = {
+      query: {},
+    };
+
+    res = {
+      status: jest.fn().mockReturnThis(),
+      json: jest.fn(),
+      setHeader: jest.fn(),
+      headersSent: false,
+      // Mock stream methods for pipe()
+      on: jest.fn(),
+      once: jest.fn(),
+      emit: jest.fn(),
+      write: jest.fn(),
+      end: jest.fn(),
+    };
+
+    // Mock ApiResponse methods
+    ApiResponse.error = jest.fn();
+    ApiResponse.success = jest.fn();
+
+    // Reset all mocks
+    jest.clearAllMocks();
+
+    // Reset implementation mặc định cho fs.existsSync
+    // Mặc định giả lập là file font CÓ tồn tại
+    mockExistsSync.mockReturnValue(true);
+  });
+
+  describe("Input Validation", () => {
+    test("should return 400 if type is missing", async () => {
+      req.query = { reportType: "stock_summary" };
+
+      await exportReport(req, res);
+
+      expect(ApiResponse.error).toHaveBeenCalledWith(
+        res,
+        "Loại file không hợp lệ. Chỉ hỗ trợ type=pdf",
+        400
+      );
+    });
+
+    test("should return 400 if type is not pdf", async () => {
+      req.query = { type: "excel", reportType: "stock_summary" };
+
+      await exportReport(req, res);
+
+      expect(ApiResponse.error).toHaveBeenCalledWith(
+        res,
+        "Loại file không hợp lệ. Chỉ hỗ trợ type=pdf",
+        400
+      );
+    });
+
+    test("should return 400 if reportType is missing", async () => {
+      req.query = { type: "pdf" };
+
+      await exportReport(req, res);
+
+      expect(ApiResponse.error).toHaveBeenCalledWith(
+        res,
+        expect.stringContaining("Loại báo cáo không hợp lệ"),
+        400
+      );
+    });
+
+    test("should return 400 if reportType is invalid", async () => {
+      req.query = { type: "pdf", reportType: "invalid_type" };
+
+      await exportReport(req, res);
+
+      expect(ApiResponse.error).toHaveBeenCalledWith(
+        res,
+        expect.stringContaining("Loại báo cáo không hợp lệ"),
+        400
+      );
+    });
+
+    test("should return 400 if stock_summary requires startDate and endDate", async () => {
+      req.query = { type: "pdf", reportType: "stock_summary" };
+
+      await exportReport(req, res);
+
+      expect(ApiResponse.error).toHaveBeenCalledWith(
+        res,
+        "Báo cáo xuất-nhập-tồn yêu cầu startDate và endDate",
+        400
+      );
+    });
+
+    test("should return 400 if trends requires startDate and endDate", async () => {
+      req.query = { type: "pdf", reportType: "trends" };
+
+      await exportReport(req, res);
+
+      expect(ApiResponse.error).toHaveBeenCalledWith(
+        res,
+        "Báo cáo xu hướng yêu cầu startDate và endDate",
+        400
+      );
+    });
+
+    test("should accept valid parameters", async () => {
+      req.query = {
+        type: "pdf",
+        reportType: "status_distribution",
+      };
+
+      // Mock aggregate success
+      Transaction.aggregate = jest.fn().mockResolvedValue([
+        { status: "COMPLETED", count: 10 },
+      ]);
+
+      await exportReport(req, res);
+
+      expect(res.setHeader).toHaveBeenCalledWith(
+        "Content-Type",
+        "application/pdf"
+      );
+    });
+  });
+
+  describe("PDF Generation - Stock Summary", () => {
+    test("should generate PDF for stock_summary report", async () => {
+      req.query = {
+        type: "pdf",
+        reportType: "stock_summary",
+        startDate: "2024-01-01",
+        endDate: "2024-01-31",
+      };
+
+      const mockProducts = [
+        { _id: new mongoose.Types.ObjectId(), name: "Product 1", unit: "Box" },
+      ];
+
+      Product.find = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue(mockProducts),
+        }),
+      });
+
+      // Mock 4 aggregate calls: opening inbound, opening outbound, period inbound, period outbound
+      TransactionDetail.aggregate = jest
+        .fn()
+        .mockResolvedValueOnce([{ totalQuantity: 50 }])  // opening stock inbound
+        .mockResolvedValueOnce([])                        // opening stock outbound
+        .mockResolvedValueOnce([{ totalQuantity: 100 }]) // period inbound
+        .mockResolvedValueOnce([{ totalQuantity: 30 }]); // period outbound
+
+      await exportReport(req, res);
+
+      expect(res.setHeader).toHaveBeenCalledWith(
+        "Content-Type",
+        "application/pdf"
+      );
+      expect(res.setHeader).toHaveBeenCalledWith(
+        "Content-Disposition",
+        expect.stringContaining("attachment; filename=report_stock_summary_")
+      );
+      expect(mockDoc.pipe).toHaveBeenCalledWith(res);
+      expect(mockDoc.end).toHaveBeenCalled();
+    });
+
+    test("should register custom fonts if available", async () => {
+      req.query = {
+        type: "pdf",
+        reportType: "status_distribution",
+      };
+
+      // Giả lập file font tồn tại
+      mockExistsSync.mockReturnValue(true);
+      
+      // Mock status_distribution data fetch
+      Transaction.aggregate = jest.fn().mockResolvedValue([
+        { status: "COMPLETED", count: 10 },
+      ]);
+
+      await exportReport(req, res);
+
+      expect(mockDoc.registerFont).toHaveBeenCalledWith(
+        "Roboto",
+        expect.stringContaining("Roboto-Regular.ttf")
+      );
+      expect(mockDoc.registerFont).toHaveBeenCalledWith(
+        "Roboto-Bold",
+        expect.stringContaining("Roboto-Bold.ttf")
+      );
+    });
+
+    test("should fallback to Helvetica if fonts not found", async () => {
+      req.query = {
+        type: "pdf",
+        reportType: "status_distribution",
+      };
+
+      // Giả lập file font KHÔNG tồn tại
+      mockExistsSync.mockReturnValue(false);
+      
+      // Mock status_distribution data fetch
+      Transaction.aggregate = jest.fn().mockResolvedValue([
+        { status: "COMPLETED", count: 10 },
+      ]);
+
+      const consoleSpy = jest.spyOn(console, "warn").mockImplementation();
+
+      await exportReport(req, res);
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Không tìm thấy file font Roboto")
+      );
+      expect(mockDoc.font).toHaveBeenCalledWith("Helvetica");
+
+      consoleSpy.mockRestore();
+    });
+  });
+
+  describe("PDF Generation - Trends", () => {
+    test("should generate PDF for trends report", async () => {
+      req.query = {
+        type: "pdf",
+        reportType: "trends",
+        startDate: "2024-01-01",
+        endDate: "2024-12-31",
+      };
+
+      // Mock 2 lần gọi aggregate (inbound và outbound)
+      Transaction.aggregate = jest
+        .fn()
+        .mockResolvedValueOnce([
+          {
+            year: 2024,
+            month: 1,
+            totalQuantity: 100,
+            totalValue: 1000000,
+            transactionCount: 5,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            year: 2024,
+            month: 1,
+            totalQuantity: 50,
+            totalValue: 500000,
+            transactionCount: 3,
+          },
+        ]);
+
+      await exportReport(req, res);
+
+      expect(res.setHeader).toHaveBeenCalledWith(
+        "Content-Type",
+        "application/pdf"
+      );
+      expect(res.setHeader).toHaveBeenCalledWith(
+        "Content-Disposition",
+        expect.stringContaining("attachment; filename=report_trends_")
+      );
+      expect(mockDoc.end).toHaveBeenCalled();
+    });
+  });
+
+  describe("PDF Generation - Status Distribution", () => {
+    test("should generate PDF for status_distribution report", async () => {
+      req.query = {
+        type: "pdf",
+        reportType: "status_distribution",
+        startDate: "2024-01-01",
+        endDate: "2024-12-31",
+      };
+
+      Transaction.aggregate = jest.fn().mockResolvedValue([
+        { status: "COMPLETED", count: 60 },
+        { status: "DRAFT", count: 30 },
+        { status: "CANCELED", count: 10 },
+      ]);
+
+      await exportReport(req, res);
+
+      expect(res.setHeader).toHaveBeenCalledWith(
+        "Content-Type",
+        "application/pdf"
+      );
+      expect(res.setHeader).toHaveBeenCalledWith(
+        "Content-Disposition",
+        expect.stringContaining("attachment; filename=report_status_distribution_")
+      );
+      expect(mockDoc.end).toHaveBeenCalled();
+    });
+
+    test("should work without date parameters for status_distribution", async () => {
+      req.query = {
+        type: "pdf",
+        reportType: "status_distribution",
+      };
+
+      Transaction.aggregate = jest.fn().mockResolvedValue([
+        { status: "COMPLETED", count: 10 },
+      ]);
+
+      await exportReport(req, res);
+
+      expect(mockDoc.end).toHaveBeenCalled();
+    });
+  });
+
+  describe("PDF Content Generation", () => {
+    test("should call font methods for title", async () => {
+      req.query = {
+        type: "pdf",
+        reportType: "status_distribution",
+      };
+
+      // Mock status_distribution data fetch
+      Transaction.aggregate = jest.fn().mockResolvedValue([
+        { status: "COMPLETED", count: 10 },
+      ]);
+
+      await exportReport(req, res);
+
+      expect(mockDoc.font).toHaveBeenCalledWith("Roboto-Bold");
+      expect(mockDoc.fontSize).toHaveBeenCalled();
+      expect(mockDoc.text).toHaveBeenCalled();
+    });
+
+    test("should include date range in PDF when provided", async () => {
+      req.query = {
+        type: "pdf",
+        reportType: "status_distribution",
+        startDate: "2024-01-01",
+        endDate: "2024-12-31",
+      };
+
+      // Mock status_distribution data fetch
+      Transaction.aggregate = jest.fn().mockResolvedValue([
+        { status: "COMPLETED", count: 10 },
+      ]);
+
+      await exportReport(req, res);
+
+      expect(mockDoc.text).toHaveBeenCalledWith(
+        expect.stringContaining("Từ ngày:"),
+        expect.any(Object)
+      );
+    });
+
+    test("should generate page numbers in footer", async () => {
+      req.query = {
+        type: "pdf",
+        reportType: "status_distribution",
+      };
+
+      // Mock status_distribution data fetch
+      Transaction.aggregate = jest.fn().mockResolvedValue([
+        { status: "COMPLETED", count: 10 },
+      ]);
+
+      await exportReport(req, res);
+
+      expect(mockDoc.bufferedPageRange).toHaveBeenCalled();
+      expect(mockDoc.switchToPage).toHaveBeenCalled();
+    });
+  });
+
+  describe("Error Handling", () => {
+    test("should handle database errors during data fetching", async () => {
+      req.query = {
+        type: "pdf",
+        reportType: "status_distribution",
+      };
+
+      const dbError = new Error("DB Error");
+      Transaction.aggregate = jest.fn().mockRejectedValue(dbError);
+
+      await exportReport(req, res);
+
+      expect(ApiResponse.error).toHaveBeenCalledWith(
+        res,
+        "Lỗi khi xuất báo cáo",
+        500,
+        "DB Error"
+      );
+    });
+
+    test("should handle invalid date format", async () => {
+      req.query = {
+        type: "pdf",
+        reportType: "stock_summary",
+        startDate: "invalid-date",
+        endDate: "2024-12-31",
+      };
+
+      Product.find = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue([]),
+        }),
+      });
+
+      await exportReport(req, res);
+
+      expect(ApiResponse.error).toHaveBeenCalledWith(
+        res,
+        "Lỗi khi xuất báo cáo",
+        500,
+        expect.any(String)
+      );
+    });
+
+    test("should not send error if headers already sent", async () => {
+      req.query = {
+        type: "pdf",
+        reportType: "status_distribution",
+      };
+
+      res.headersSent = true;
+      const dbError = new Error("Error during PDF generation");
+      Transaction.aggregate = jest.fn().mockRejectedValue(dbError);
+
+      const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation();
+
+      await exportReport(req, res);
+
+      expect(ApiResponse.error).not.toHaveBeenCalled();
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "Error in exportReport:",
+        dbError
+      );
+
+      consoleErrorSpy.mockRestore();
+    });
+  });
+
+  describe("Response Headers", () => {
+    test("should set correct Content-Type header", async () => {
+      req.query = {
+        type: "pdf",
+        reportType: "status_distribution",
+      };
+
+      Transaction.aggregate = jest.fn().mockResolvedValue([
+        { status: "COMPLETED", count: 10 },
+      ]);
+
+      await exportReport(req, res);
+
+      expect(res.setHeader).toHaveBeenCalledWith(
+        "Content-Type",
+        "application/pdf"
+      );
+    });
+
+    test("should set correct Content-Disposition with filename", async () => {
+      req.query = {
+        type: "pdf",
+        reportType: "trends",
+        startDate: "2024-01-01",
+        endDate: "2024-12-31",
+      };
+
+      Transaction.aggregate = jest
+        .fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+
+      await exportReport(req, res);
+
+      expect(res.setHeader).toHaveBeenCalledWith(
+        "Content-Disposition",
+        expect.stringMatching(/^attachment; filename=report_trends_\d+\.pdf$/)
+      );
+    });
+  });
+
+  describe("PDF Document Configuration", () => {
+    test("should initialize PDFDocument with correct options", async () => {
+      req.query = {
+        type: "pdf",
+        reportType: "status_distribution",
+      };
+
+      // Mock status_distribution data fetch
+      Transaction.aggregate = jest.fn().mockResolvedValue([
+        { status: "COMPLETED", count: 10 },
+      ]);
+
+      await exportReport(req, res);
+
+      // PDFDocument constructor is already mocked, check instance creation
+      expect(mockDoc.pipe).toHaveBeenCalledWith(res);
+    });
+
+    test("should pipe PDF to response stream", async () => {
+      req.query = {
+        type: "pdf",
+        reportType: "status_distribution",
+      };
+
+      // Mock status_distribution data fetch
+      Transaction.aggregate = jest.fn().mockResolvedValue([
+        { status: "COMPLETED", count: 10 },
+      ]);
+
+      await exportReport(req, res);
+
+      expect(mockDoc.pipe).toHaveBeenCalledWith(res);
+    });
+
+    test("should finalize PDF document", async () => {
+      req.query = {
+        type: "pdf",
+        reportType: "status_distribution",
+      };
+
+      // Mock status_distribution data fetch
+      Transaction.aggregate = jest.fn().mockResolvedValue([
+        { status: "COMPLETED", count: 10 },
+      ]);
+
+      await exportReport(req, res);
+
+      expect(mockDoc.end).toHaveBeenCalled();
     });
   });
 });
