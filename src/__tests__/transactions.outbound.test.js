@@ -1,0 +1,519 @@
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  afterAll,
+  afterEach,
+} from "@jest/globals";
+import request from "supertest";
+import express from "express";
+import mongoose from "mongoose";
+
+import { connect, closeDatabase, clearDatabase } from "./setup/db.js";
+import {
+  generateTestToken,
+  createTestUser,
+  createProductData,
+} from "./setup/helpers.js";
+
+import transactionRoutes from "../routes/transaction.route.js";
+import {
+  Product,
+  Department,
+  Warehouse,
+  InventoryLot,
+  Transaction,
+  TransactionDetail,
+} from "../models/index.js";
+
+// ---- Setup Express test app
+const app = express();
+app.use(express.json());
+app.use("/api/transactions", transactionRoutes);
+
+// ---- Helpers to create fixtures
+const createWarehouse = (overrides = {}) =>
+  Warehouse.create({
+    code: "WH001",
+    name: "Main Warehouse",
+    address: "QNU Campus",
+    isActive: true,
+    ...overrides,
+  });
+
+const createDepartment = (overrides = {}) =>
+  Department.create({
+    code: "DEPT001",
+    name: "Khoa Nội",
+    type: "clinical",
+    phone: "0123456789",
+    isActive: true,
+    ...overrides,
+  });
+
+const createProduct = (overrides = {}) =>
+  Product.create(
+    createProductData({
+      sku: "SKU001",
+      name: "Paracetamol 500mg",
+      unit: "viên",
+      minimumStock: 5,
+      currentStock: 0,
+      ...overrides,
+    })
+  );
+
+const createInventoryLot = (warehouseId, productId, overrides = {}) =>
+  InventoryLot.create({
+    productId,
+    warehouseId,
+    lotNumber: "LOT-TEST-001",
+    quantity: 100,
+    unitCost: 1000,
+    expiryDate: new Date(Date.now() + 365 * 24 * 3600 * 1000),
+    ...overrides,
+  });
+
+// Helper to create OUTBOUND transaction directly in DB
+const createOutboundTransaction = async (userId, warehouseId, departmentId) => {
+  const tx = await Transaction.create({
+    type: "OUTBOUND",
+    status: "COMPLETED",
+    referenceCode: "OUT-001",
+    notes: "Test outbound transaction",
+    transactionDate: new Date(),
+    userId,
+    sourceWarehouseId: warehouseId,
+    departmentId,
+    completedAt: new Date(),
+  });
+  return tx;
+};
+
+// Shared variables for all describe blocks
+let adminToken, userToken;
+let adminUser, normalUser;
+
+beforeAll(async () => {
+  process.env.JWT_SECRET = "test-secret";
+  await connect();
+
+  // Create test users in database
+  adminUser = await createTestUser({
+    username: "adminuser",
+    email: "admin@example.com",
+    role: "admin",
+  });
+  normalUser = await createTestUser({
+    username: "normaluser",
+    email: "user@example.com",
+    role: "user",
+  });
+
+  adminToken = generateTestToken(adminUser);
+  userToken = generateTestToken(normalUser);
+});
+
+afterAll(async () => {
+  await closeDatabase();
+});
+
+afterEach(async () => {
+  await clearDatabase();
+});
+
+describe("GET /api/transactions?type=OUTBOUND - List OUTBOUND Transactions", () => {
+  it("200 | should return empty list when no outbound transactions exist", async () => {
+    const res = await request(app)
+      .get("/api/transactions?type=OUTBOUND")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.transactions).toEqual([]);
+    expect(res.body.data.pagination.total).toBe(0);
+    expect(res.body.data.pagination.totalPages).toBe(0);
+  });
+
+  it("200 | should return list of outbound transactions with default pagination", async () => {
+    const [wh, dept] = await Promise.all([
+      createWarehouse(),
+      createDepartment(),
+    ]);
+
+    // Create 3 outbound transactions
+    await Promise.all([
+      createOutboundTransaction(adminUser._id, wh._id, dept._id),
+      createOutboundTransaction(adminUser._id, wh._id, dept._id).then((tx) => {
+        tx.referenceCode = "OUT-002";
+        return tx.save();
+      }),
+      createOutboundTransaction(normalUser._id, wh._id, dept._id).then((tx) => {
+        tx.referenceCode = "OUT-003";
+        return tx.save();
+      }),
+    ]);
+
+    const res = await request(app)
+      .get("/api/transactions?type=OUTBOUND")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.transactions).toHaveLength(3);
+    expect(res.body.data.pagination.total).toBe(3);
+    expect(res.body.data.pagination.page).toBe(1);
+    expect(res.body.data.pagination.limit).toBe(10);
+    expect(res.body.data.pagination.totalPages).toBe(1);
+
+    // Check populated fields
+    const tx = res.body.data.transactions[0];
+    expect(tx.sourceWarehouseId).toBeDefined();
+    expect(tx.sourceWarehouseId.code).toBe("WH001");
+    expect(tx.departmentId).toBeDefined();
+    expect(tx.departmentId.code).toBe("DEPT001");
+    expect(tx.userId).toBeDefined();
+  });
+
+  it("200 | should support pagination with page and limit", async () => {
+    const [wh, dept] = await Promise.all([
+      createWarehouse(),
+      createDepartment(),
+    ]);
+
+    // Create 15 outbound transactions
+    const promises = [];
+    for (let i = 1; i <= 15; i++) {
+      promises.push(
+        createOutboundTransaction(adminUser._id, wh._id, dept._id).then(
+          (tx) => {
+            tx.referenceCode = `OUT-${String(i).padStart(3, "0")}`;
+            return tx.save();
+          }
+        )
+      );
+    }
+    await Promise.all(promises);
+
+    // Get page 1 with limit 10
+    const res1 = await request(app)
+      .get("/api/transactions?type=OUTBOUND&page=1&limit=10")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .expect(200);
+
+    expect(res1.body.data.transactions).toHaveLength(10);
+    expect(res1.body.data.pagination.page).toBe(1);
+    expect(res1.body.data.pagination.total).toBe(15);
+    expect(res1.body.data.pagination.totalPages).toBe(2);
+
+    // Get page 2 with limit 10
+    const res2 = await request(app)
+      .get("/api/transactions?type=OUTBOUND&page=2&limit=10")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .expect(200);
+
+    expect(res2.body.data.transactions).toHaveLength(5);
+    expect(res2.body.data.pagination.page).toBe(2);
+  });
+
+  it("200 | should filter by search (referenceCode)", async () => {
+    const [wh, dept] = await Promise.all([
+      createWarehouse(),
+      createDepartment(),
+    ]);
+
+    await Promise.all([
+      createOutboundTransaction(adminUser._id, wh._id, dept._id).then((tx) => {
+        tx.referenceCode = "OUT-AAA-001";
+        return tx.save();
+      }),
+      createOutboundTransaction(adminUser._id, wh._id, dept._id).then((tx) => {
+        tx.referenceCode = "OUT-BBB-002";
+        return tx.save();
+      }),
+      createOutboundTransaction(adminUser._id, wh._id, dept._id).then((tx) => {
+        tx.referenceCode = "OUT-AAA-003";
+        return tx.save();
+      }),
+    ]);
+
+    const res = await request(app)
+      .get("/api/transactions?type=OUTBOUND&search=AAA")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.transactions).toHaveLength(2);
+    expect(res.body.data.transactions[0].referenceCode).toContain("AAA");
+    expect(res.body.data.transactions[1].referenceCode).toContain("AAA");
+  });
+
+  it("200 | should filter by search (_id)", async () => {
+    const [wh, dept] = await Promise.all([
+      createWarehouse(),
+      createDepartment(),
+    ]);
+
+    const tx = await createOutboundTransaction(adminUser._id, wh._id, dept._id);
+    await createOutboundTransaction(adminUser._id, wh._id, dept._id);
+
+    const res = await request(app)
+      .get(`/api/transactions?type=OUTBOUND&search=${tx._id.toString()}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.transactions).toHaveLength(1);
+    expect(res.body.data.transactions[0]._id).toBe(tx._id.toString());
+  });
+
+  it("200 | should filter by date range (fromDate and toDate)", async () => {
+    const [wh, dept] = await Promise.all([
+      createWarehouse(),
+      createDepartment(),
+    ]);
+
+    const yesterday = new Date(Date.now() - 24 * 3600 * 1000);
+    const tomorrow = new Date(Date.now() + 24 * 3600 * 1000);
+    const nextWeek = new Date(Date.now() + 7 * 24 * 3600 * 1000);
+
+    // Create transactions with different dates
+    await Promise.all([
+      createOutboundTransaction(adminUser._id, wh._id, dept._id).then((tx) => {
+        tx.transactionDate = yesterday;
+        return tx.save();
+      }),
+      createOutboundTransaction(adminUser._id, wh._id, dept._id).then((tx) => {
+        tx.transactionDate = new Date();
+        return tx.save();
+      }),
+      createOutboundTransaction(adminUser._id, wh._id, dept._id).then((tx) => {
+        tx.transactionDate = nextWeek;
+        return tx.save();
+      }),
+    ]);
+
+    const res = await request(app)
+      .get(
+        `/api/transactions?type=OUTBOUND&fromDate=${yesterday.toISOString()}&toDate=${tomorrow.toISOString()}`
+      )
+      .set("Authorization", `Bearer ${adminToken}`)
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.transactions).toHaveLength(2);
+  });
+
+  it("200 | user role can also access the list", async () => {
+    const [wh, dept] = await Promise.all([
+      createWarehouse(),
+      createDepartment(),
+    ]);
+
+    await createOutboundTransaction(normalUser._id, wh._id, dept._id);
+
+    const res = await request(app)
+      .get("/api/transactions?type=OUTBOUND")
+      .set("Authorization", `Bearer ${userToken}`)
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.transactions).toHaveLength(1);
+  });
+
+  it("400 | should return error if type is not OUTBOUND", async () => {
+    const res = await request(app)
+      .get("/api/transactions?type=INBOUND")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .expect(400);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toContain("Only type=OUTBOUND is supported");
+  });
+
+  it("401 | should return error if not authenticated", async () => {
+    await request(app).get("/api/transactions?type=OUTBOUND").expect(401);
+  });
+});
+
+describe("GET /api/transactions/:id?type=OUTBOUND - Get OUTBOUND Transaction by ID", () => {
+  it("200 | should return outbound transaction with details", async () => {
+    const [wh, dept, prod] = await Promise.all([
+      createWarehouse(),
+      createDepartment(),
+      createProduct(),
+    ]);
+
+    const lot = await createInventoryLot(wh._id, prod._id);
+
+    const tx = await createOutboundTransaction(adminUser._id, wh._id, dept._id);
+
+    // Create transaction details
+    await TransactionDetail.create({
+      transactionId: tx._id,
+      productId: prod._id,
+      inventoryLotId: lot._id,
+      quantity: 10,
+      unitPrice: 1200,
+    });
+
+    const res = await request(app)
+      .get(`/api/transactions/${tx._id}?type=OUTBOUND`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.header).toBeDefined();
+    expect(res.body.data.header._id).toBe(tx._id.toString());
+    expect(res.body.data.header.type).toBe("OUTBOUND");
+    expect(res.body.data.header.sourceWarehouseId).toBeDefined();
+    expect(res.body.data.header.sourceWarehouseId.code).toBe("WH001");
+    expect(res.body.data.header.departmentId).toBeDefined();
+    expect(res.body.data.header.departmentId.code).toBe("DEPT001");
+    expect(res.body.data.header.userId).toBeDefined();
+
+    // Check details
+    expect(res.body.data.details).toHaveLength(1);
+    expect(res.body.data.details[0].quantity).toBe(10);
+    expect(res.body.data.details[0].unitPrice).toBe(1200);
+    expect(res.body.data.details[0].productId).toBeDefined();
+    expect(res.body.data.details[0].productId.sku).toBe("SKU001");
+    expect(res.body.data.details[0].inventoryLotId).toBeDefined();
+    expect(res.body.data.details[0].inventoryLotId.lotNumber).toBe(
+      "LOT-TEST-001"
+    );
+  });
+
+  it("200 | should return outbound transaction with multiple details", async () => {
+    const [wh, dept] = await Promise.all([
+      createWarehouse(),
+      createDepartment(),
+    ]);
+
+    const prod1 = await createProduct({ sku: "SKU001", name: "Product 1" });
+    const prod2 = await createProduct({ sku: "SKU002", name: "Product 2" });
+
+    const lot1 = await createInventoryLot(wh._id, prod1._id, {
+      lotNumber: "LOT-001",
+    });
+    const lot2 = await createInventoryLot(wh._id, prod2._id, {
+      lotNumber: "LOT-002",
+    });
+
+    const tx = await createOutboundTransaction(adminUser._id, wh._id, dept._id);
+
+    await TransactionDetail.insertMany([
+      {
+        transactionId: tx._id,
+        productId: prod1._id,
+        inventoryLotId: lot1._id,
+        quantity: 10,
+        unitPrice: 1000,
+      },
+      {
+        transactionId: tx._id,
+        productId: prod2._id,
+        inventoryLotId: lot2._id,
+        quantity: 20,
+        unitPrice: 2000,
+      },
+    ]);
+
+    const res = await request(app)
+      .get(`/api/transactions/${tx._id}?type=OUTBOUND`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.details).toHaveLength(2);
+  });
+
+  it("200 | user role can also access transaction detail", async () => {
+    const [wh, dept, prod] = await Promise.all([
+      createWarehouse(),
+      createDepartment(),
+      createProduct(),
+    ]);
+
+    const lot = await createInventoryLot(wh._id, prod._id);
+    const tx = await createOutboundTransaction(
+      normalUser._id,
+      wh._id,
+      dept._id
+    );
+
+    await TransactionDetail.create({
+      transactionId: tx._id,
+      productId: prod._id,
+      inventoryLotId: lot._id,
+      quantity: 5,
+      unitPrice: 800,
+    });
+
+    const res = await request(app)
+      .get(`/api/transactions/${tx._id}?type=OUTBOUND`)
+      .set("Authorization", `Bearer ${userToken}`)
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.header._id).toBe(tx._id.toString());
+  });
+
+  it("404 | should return error if transaction not found", async () => {
+    const fakeId = new mongoose.Types.ObjectId();
+
+    const res = await request(app)
+      .get(`/api/transactions/${fakeId}?type=OUTBOUND`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .expect(404);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toContain("not found");
+  });
+
+  it("400 | should return error if invalid id format", async () => {
+    const res = await request(app)
+      .get("/api/transactions/invalid-id?type=OUTBOUND")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .expect(400);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toContain("Invalid id");
+  });
+
+  it("404 | should not return INBOUND transaction when querying with type=OUTBOUND", async () => {
+    const [wh, dept] = await Promise.all([
+      createWarehouse(),
+      createDepartment(),
+    ]);
+
+    // Create an INBOUND transaction
+    const inboundTx = await Transaction.create({
+      type: "INBOUND",
+      status: "COMPLETED",
+      referenceCode: "IN-001",
+      notes: "Test inbound",
+      transactionDate: new Date(),
+      userId: adminUser._id,
+      destinationWarehouseId: wh._id,
+      supplierId: dept._id, // using dept as supplier for test
+      completedAt: new Date(),
+    });
+
+    const res = await request(app)
+      .get(`/api/transactions/${inboundTx._id}?type=OUTBOUND`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .expect(404);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toContain("not found");
+  });
+
+  it("401 | should return error if not authenticated", async () => {
+    const fakeId = new mongoose.Types.ObjectId();
+    await request(app)
+      .get(`/api/transactions/${fakeId}?type=OUTBOUND`)
+      .expect(401);
+  });
+});
