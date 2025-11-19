@@ -1,5 +1,5 @@
 import { jest } from "@jest/globals";
-import { getStockSummary, getTrends } from "../../controllers/report.controller.js";
+import { getStockSummary, getTrends, getStatusDistribution } from "../../controllers/report.controller.js";
 import Transaction from "../../models/transaction.model.js";
 import TransactionDetail from "../../models/transactionDetail.model.js";
 import Product from "../../models/product.model.js";
@@ -1140,6 +1140,385 @@ describe("Report Controller - getTrends", () => {
           ]),
         }),
         "Lấy dữ liệu biểu đồ thành công",
+        200
+      );
+    });
+  });
+});
+
+describe("Report Controller - getStatusDistribution", () => {
+  let req, res;
+
+  beforeEach(() => {
+    req = {
+      query: {},
+    };
+    res = {
+      status: jest.fn().mockReturnThis(),
+      json: jest.fn(),
+    };
+
+    // Mock ApiResponse methods
+    ApiResponse.error = jest.fn();
+    ApiResponse.success = jest.fn();
+
+    jest.clearAllMocks();
+  });
+
+  describe("Input Validation", () => {
+    test("should return 400 if startDate format is invalid", async () => {
+      req.query = { startDate: "invalid-date" };
+
+      await getStatusDistribution(req, res);
+
+      expect(ApiResponse.error).toHaveBeenCalledWith(
+        res,
+        "Định dạng startDate không hợp lệ",
+        400
+      );
+    });
+
+    test("should return 400 if endDate format is invalid", async () => {
+      req.query = { endDate: "invalid-date" };
+
+      await getStatusDistribution(req, res);
+
+      expect(ApiResponse.error).toHaveBeenCalledWith(
+        res,
+        "Định dạng endDate không hợp lệ",
+        400
+      );
+    });
+
+    test("should return 400 if startDate is after endDate", async () => {
+      req.query = { startDate: "2024-12-31", endDate: "2024-01-01" };
+
+      await getStatusDistribution(req, res);
+
+      expect(ApiResponse.error).toHaveBeenCalledWith(
+        res,
+        "startDate phải nhỏ hơn hoặc bằng endDate",
+        400
+      );
+    });
+
+    test("should accept valid date range", async () => {
+      req.query = { startDate: "2024-01-01", endDate: "2024-12-31" };
+
+      Transaction.aggregate = jest.fn().mockResolvedValue([
+        { status: "COMPLETED", count: 10 },
+      ]);
+
+      await getStatusDistribution(req, res);
+
+      expect(ApiResponse.success).toHaveBeenCalled();
+    });
+
+    test("should work without date parameters", async () => {
+      req.query = {};
+
+      Transaction.aggregate = jest.fn().mockResolvedValue([
+        { status: "COMPLETED", count: 10 },
+      ]);
+
+      await getStatusDistribution(req, res);
+
+      expect(ApiResponse.success).toHaveBeenCalled();
+    });
+
+    test("should work with only startDate", async () => {
+      req.query = { startDate: "2024-01-01" };
+
+      Transaction.aggregate = jest.fn().mockResolvedValue([
+        { status: "COMPLETED", count: 10 },
+      ]);
+
+      await getStatusDistribution(req, res);
+
+      expect(ApiResponse.success).toHaveBeenCalled();
+    });
+
+    test("should work with only endDate", async () => {
+      req.query = { endDate: "2024-12-31" };
+
+      Transaction.aggregate = jest.fn().mockResolvedValue([
+        { status: "COMPLETED", count: 10 },
+      ]);
+
+      await getStatusDistribution(req, res);
+
+      expect(ApiResponse.success).toHaveBeenCalled();
+    });
+  });
+
+  describe("Status Distribution Calculation", () => {
+    test("should correctly calculate distribution for single status", async () => {
+      req.query = {};
+
+      const mockData = [{ status: "COMPLETED", count: 50 }];
+
+      Transaction.aggregate = jest.fn().mockResolvedValue(mockData);
+
+      await getStatusDistribution(req, res);
+
+      expect(ApiResponse.success).toHaveBeenCalledWith(
+        res,
+        {
+          startDate: null,
+          endDate: null,
+          totalTransactions: 50,
+          distribution: [
+            {
+              status: "COMPLETED",
+              count: 50,
+              percentage: 100,
+            },
+          ],
+        },
+        "Lấy phân bổ trạng thái thành công",
+        200
+      );
+    });
+
+    test("should correctly calculate distribution for multiple statuses", async () => {
+      req.query = {};
+
+      const mockData = [
+        { status: "COMPLETED", count: 60 },
+        { status: "DRAFT", count: 30 },
+        { status: "CANCELED", count: 10 },
+      ];
+
+      Transaction.aggregate = jest.fn().mockResolvedValue(mockData);
+
+      await getStatusDistribution(req, res);
+
+      expect(ApiResponse.success).toHaveBeenCalledWith(
+        res,
+        {
+          startDate: null,
+          endDate: null,
+          totalTransactions: 100,
+          distribution: [
+            {
+              status: "COMPLETED",
+              count: 60,
+              percentage: 60,
+            },
+            {
+              status: "DRAFT",
+              count: 30,
+              percentage: 30,
+            },
+            {
+              status: "CANCELED",
+              count: 10,
+              percentage: 10,
+            },
+          ],
+        },
+        "Lấy phân bổ trạng thái thành công",
+        200
+      );
+    });
+
+    test("should handle empty result", async () => {
+      req.query = {};
+
+      Transaction.aggregate = jest.fn().mockResolvedValue([]);
+
+      await getStatusDistribution(req, res);
+
+      expect(ApiResponse.success).toHaveBeenCalledWith(
+        res,
+        {
+          startDate: null,
+          endDate: null,
+          totalTransactions: 0,
+          distribution: [],
+        },
+        "Lấy phân bổ trạng thái thành công",
+        200
+      );
+    });
+
+    test("should round percentages to 2 decimal places", async () => {
+      req.query = {};
+
+      const mockData = [
+        { status: "COMPLETED", count: 33 },
+        { status: "DRAFT", count: 33 },
+        { status: "CANCELED", count: 34 },
+      ];
+
+      Transaction.aggregate = jest.fn().mockResolvedValue(mockData);
+
+      await getStatusDistribution(req, res);
+
+      const result = ApiResponse.success.mock.calls[0][1];
+      expect(result.distribution[0].percentage).toBe(33);
+      expect(result.distribution[1].percentage).toBe(33);
+      expect(result.distribution[2].percentage).toBe(34);
+    });
+
+    test("should calculate correct percentages with decimal precision", async () => {
+      req.query = {};
+
+      const mockData = [
+        { status: "COMPLETED", count: 7 },
+        { status: "DRAFT", count: 3 },
+      ];
+
+      Transaction.aggregate = jest.fn().mockResolvedValue(mockData);
+
+      await getStatusDistribution(req, res);
+
+      const result = ApiResponse.success.mock.calls[0][1];
+      expect(result.distribution[0].percentage).toBe(70);
+      expect(result.distribution[1].percentage).toBe(30);
+    });
+  });
+
+  describe("Date Range Filtering", () => {
+    test("should apply date range filter correctly", async () => {
+      req.query = { startDate: "2024-01-01", endDate: "2024-01-31" };
+
+      Transaction.aggregate = jest.fn().mockResolvedValue([
+        { status: "COMPLETED", count: 10 },
+      ]);
+
+      await getStatusDistribution(req, res);
+
+      expect(Transaction.aggregate).toHaveBeenCalledWith([
+        {
+          $match: {
+            transactionDate: {
+              $gte: expect.any(Date),
+              $lte: expect.any(Date),
+            },
+          },
+        },
+        {
+          $group: {
+            _id: "$status",
+            count: { $sum: 1 },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            status: "$_id",
+            count: 1,
+          },
+        },
+        { $sort: { status: 1 } },
+      ]);
+    });
+
+    test("should normalize start date to beginning of day", async () => {
+      req.query = { startDate: "2024-01-15" };
+
+      Transaction.aggregate = jest.fn().mockResolvedValue([]);
+
+      await getStatusDistribution(req, res);
+
+      const matchStage = Transaction.aggregate.mock.calls[0][0][0].$match;
+      const startDate = matchStage.transactionDate.$gte;
+      expect(startDate.getHours()).toBe(0);
+      expect(startDate.getMinutes()).toBe(0);
+      expect(startDate.getSeconds()).toBe(0);
+      expect(startDate.getMilliseconds()).toBe(0);
+    });
+
+    test("should normalize end date to end of day", async () => {
+      req.query = { endDate: "2024-01-15" };
+
+      Transaction.aggregate = jest.fn().mockResolvedValue([]);
+
+      await getStatusDistribution(req, res);
+
+      const matchStage = Transaction.aggregate.mock.calls[0][0][0].$match;
+      const endDate = matchStage.transactionDate.$lte;
+      expect(endDate.getHours()).toBe(23);
+      expect(endDate.getMinutes()).toBe(59);
+      expect(endDate.getSeconds()).toBe(59);
+      expect(endDate.getMilliseconds()).toBe(999);
+    });
+
+    test("should not include date filter when no dates provided", async () => {
+      req.query = {};
+
+      Transaction.aggregate = jest.fn().mockResolvedValue([]);
+
+      await getStatusDistribution(req, res);
+
+      const matchStage = Transaction.aggregate.mock.calls[0][0][0].$match;
+      expect(matchStage).toEqual({});
+    });
+  });
+
+  describe("Error Handling", () => {
+    test("should handle database errors", async () => {
+      req.query = {};
+
+      const dbError = new Error("Database connection failed");
+      Transaction.aggregate = jest.fn().mockRejectedValue(dbError);
+
+      await getStatusDistribution(req, res);
+
+      expect(ApiResponse.error).toHaveBeenCalledWith(
+        res,
+        "Lỗi khi lấy phân bổ trạng thái",
+        500,
+        dbError.message
+      );
+    });
+
+    test("should handle aggregate pipeline errors", async () => {
+      req.query = {};
+
+      const pipelineError = new Error("Invalid pipeline stage");
+      Transaction.aggregate = jest.fn().mockRejectedValue(pipelineError);
+
+      await getStatusDistribution(req, res);
+
+      expect(ApiResponse.error).toHaveBeenCalledWith(
+        res,
+        "Lỗi khi lấy phân bổ trạng thái",
+        500,
+        pipelineError.message
+      );
+    });
+  });
+
+  describe("Response Format", () => {
+    test("should return correct response format", async () => {
+      req.query = { startDate: "2024-01-01", endDate: "2024-12-31" };
+
+      const mockData = [
+        { status: "COMPLETED", count: 50 },
+        { status: "DRAFT", count: 30 },
+      ];
+
+      Transaction.aggregate = jest.fn().mockResolvedValue(mockData);
+
+      await getStatusDistribution(req, res);
+
+      expect(ApiResponse.success).toHaveBeenCalledWith(
+        res,
+        expect.objectContaining({
+          startDate: expect.any(Date),
+          endDate: expect.any(Date),
+          totalTransactions: expect.any(Number),
+          distribution: expect.arrayContaining([
+            expect.objectContaining({
+              status: expect.any(String),
+              count: expect.any(Number),
+              percentage: expect.any(Number),
+            }),
+          ]),
+        }),
+        "Lấy phân bổ trạng thái thành công",
         200
       );
     });
