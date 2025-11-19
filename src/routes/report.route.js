@@ -1,5 +1,5 @@
 import express from "express";
-import { getStockSummary, getTrends } from "../controllers/report.controller.js";
+import { getStockSummary, getTrends, getStatusDistribution } from "../controllers/report.controller.js";
 import auth from "../middleware/auth.js";
 import roleAuth from "../middleware/roleAuth.js";
 
@@ -23,6 +23,16 @@ router.get(
   auth,
   roleAuth(["admin", "user"]),
   getTrends
+);
+
+// @route GET /api/reports/status_distribution
+// @desc Get status distribution report (Biểu đồ phân bổ trạng thái)
+// @access Private (admin, manager)
+router.get(
+  "/status_distribution",
+  auth,
+  roleAuth(["admin", "user"]),
+  getStatusDistribution
 );
 
 export default router;

@@ -431,3 +431,99 @@ export const getTrends = async (req, res) => {
     );
   }
 };
+
+/**
+ * @route GET /api/reports/status_distribution
+ * @desc Lấy dữ liệu phân bổ trạng thái giao dịch (biểu đồ tròn)
+ * @param {Date} startDate - Ngày bắt đầu (query param, optional)
+ * @param {Date} endDate - Ngày kết thúc (query param, optional)
+ * @returns {Object} Phân bổ số lượng giao dịch theo trạng thái
+ */
+export const getStatusDistribution = async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+
+    // Build match filter
+    const matchFilter = {};
+
+    // Add date range filter if provided
+    if (startDate || endDate) {
+      matchFilter.transactionDate = {};
+      
+      if (startDate) {
+        const start = new Date(startDate);
+        if (isNaN(start.getTime())) {
+          return ApiResponse.error(res, "Định dạng startDate không hợp lệ", 400);
+        }
+        start.setHours(0, 0, 0, 0);
+        matchFilter.transactionDate.$gte = start;
+      }
+
+      if (endDate) {
+        const end = new Date(endDate);
+        if (isNaN(end.getTime())) {
+          return ApiResponse.error(res, "Định dạng endDate không hợp lệ", 400);
+        }
+        end.setHours(23, 59, 59, 999);
+        matchFilter.transactionDate.$lte = end;
+      }
+
+      // Validate date range
+      if (startDate && endDate && matchFilter.transactionDate.$gte > matchFilter.transactionDate.$lte) {
+        return ApiResponse.error(
+          res,
+          "startDate phải nhỏ hơn hoặc bằng endDate",
+          400
+        );
+      }
+    }
+
+    // Aggregate transactions by status
+    const statusDistribution = await Transaction.aggregate([
+      { $match: matchFilter },
+      {
+        $group: {
+          _id: "$status",
+          count: { $sum: 1 },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          status: "$_id",
+          count: 1,
+        },
+      },
+      { $sort: { status: 1 } },
+    ]);
+
+    // Calculate total and percentages
+    const total = statusDistribution.reduce((sum, item) => sum + item.count, 0);
+    
+    const distribution = statusDistribution.map((item) => ({
+      status: item.status,
+      count: item.count,
+      percentage: total > 0 ? Math.round((item.count / total) * 100 * 100) / 100 : 0,
+    }));
+
+    return ApiResponse.success(
+      res,
+      {
+        startDate: startDate ? new Date(startDate) : null,
+        endDate: endDate ? new Date(endDate) : null,
+        totalTransactions: total,
+        distribution,
+      },
+      "Lấy phân bổ trạng thái thành công",
+      200
+    );
+  } catch (error) {
+    console.error("Error in getStatusDistribution:", error);
+    return ApiResponse.error(
+      res,
+      "Lỗi khi lấy phân bổ trạng thái",
+      500,
+      error.message
+    );
+  }
+};
