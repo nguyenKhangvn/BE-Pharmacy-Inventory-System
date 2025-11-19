@@ -227,3 +227,207 @@ async function calculateTransactionTotal(
 
   return result.length > 0 ? result[0].totalQuantity : 0;
 }
+
+/**
+ * @route GET /api/reports/trends
+ * @desc Lấy dữ liệu biểu đồ nhập/xuất theo tháng
+ * @param {Date} startDate - Ngày bắt đầu (query param)
+ * @param {Date} endDate - Ngày kết thúc (query param)
+ * @returns {Object} Dữ liệu nhập/xuất theo tháng
+ */
+export const getTrends = async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+
+    // Validate date parameters
+    if (!startDate || !endDate) {
+      return ApiResponse.error(
+        res,
+        "Vui lòng cung cấp startDate và endDate",
+        400
+      );
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return ApiResponse.error(res, "Định dạng ngày không hợp lệ", 400);
+    }
+
+    if (start > end) {
+      return ApiResponse.error(
+        res,
+        "startDate phải nhỏ hơn hoặc bằng endDate",
+        400
+      );
+    }
+
+    // Set time to start and end of day
+    start.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
+
+    // Aggregate INBOUND transactions by month
+    const inboundTrends = await Transaction.aggregate([
+      {
+        $match: {
+          type: "INBOUND",
+          status: "COMPLETED",
+          transactionDate: { $gte: start, $lte: end },
+        },
+      },
+      {
+        $lookup: {
+          from: "transactiondetails",
+          localField: "_id",
+          foreignField: "transactionId",
+          as: "details",
+        },
+      },
+      { $unwind: "$details" },
+      {
+        $group: {
+          _id: {
+            year: { $year: "$transactionDate" },
+            month: { $month: "$transactionDate" },
+          },
+          totalQuantity: { $sum: "$details.quantity" },
+          totalValue: {
+            $sum: { $multiply: ["$details.quantity", "$details.unitPrice"] },
+          },
+          transactionCount: { $sum: 1 },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          year: "$_id.year",
+          month: "$_id.month",
+          totalQuantity: 1,
+          totalValue: 1,
+          transactionCount: 1,
+        },
+      },
+      { $sort: { year: 1, month: 1 } },
+    ]);
+
+    // Aggregate OUTBOUND transactions by month
+    const outboundTrends = await Transaction.aggregate([
+      {
+        $match: {
+          type: "OUTBOUND",
+          status: "COMPLETED",
+          transactionDate: { $gte: start, $lte: end },
+        },
+      },
+      {
+        $lookup: {
+          from: "transactiondetails",
+          localField: "_id",
+          foreignField: "transactionId",
+          as: "details",
+        },
+      },
+      { $unwind: "$details" },
+      {
+        $group: {
+          _id: {
+            year: { $year: "$transactionDate" },
+            month: { $month: "$transactionDate" },
+          },
+          totalQuantity: { $sum: "$details.quantity" },
+          totalValue: {
+            $sum: { $multiply: ["$details.quantity", "$details.unitPrice"] },
+          },
+          transactionCount: { $sum: 1 },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          year: "$_id.year",
+          month: "$_id.month",
+          totalQuantity: 1,
+          totalValue: 1,
+          transactionCount: 1,
+        },
+      },
+      { $sort: { year: 1, month: 1 } },
+    ]);
+
+    // Merge inbound and outbound data by month
+    const trendsMap = new Map();
+
+    // Process inbound
+    inboundTrends.forEach((item) => {
+      const key = `${item.year}-${item.month}`;
+      trendsMap.set(key, {
+        year: item.year,
+        month: item.month,
+        inbound: {
+          totalQuantity: item.totalQuantity,
+          totalValue: item.totalValue,
+          transactionCount: item.transactionCount,
+        },
+        outbound: {
+          totalQuantity: 0,
+          totalValue: 0,
+          transactionCount: 0,
+        },
+      });
+    });
+
+    // Process outbound
+    outboundTrends.forEach((item) => {
+      const key = `${item.year}-${item.month}`;
+      if (trendsMap.has(key)) {
+        trendsMap.get(key).outbound = {
+          totalQuantity: item.totalQuantity,
+          totalValue: item.totalValue,
+          transactionCount: item.transactionCount,
+        };
+      } else {
+        trendsMap.set(key, {
+          year: item.year,
+          month: item.month,
+          inbound: {
+            totalQuantity: 0,
+            totalValue: 0,
+            transactionCount: 0,
+          },
+          outbound: {
+            totalQuantity: item.totalQuantity,
+            totalValue: item.totalValue,
+            transactionCount: item.transactionCount,
+          },
+        });
+      }
+    });
+
+    // Convert map to array and sort
+    const trends = Array.from(trendsMap.values()).sort((a, b) => {
+      if (a.year !== b.year) return a.year - b.year;
+      return a.month - b.month;
+    });
+
+    return ApiResponse.success(
+      res,
+      {
+        startDate: start,
+        endDate: end,
+        totalMonths: trends.length,
+        trends,
+      },
+      "Lấy dữ liệu biểu đồ thành công",
+      200
+    );
+  } catch (error) {
+    console.error("Error in getTrends:", error);
+    return ApiResponse.error(
+      res,
+      "Lỗi khi lấy dữ liệu biểu đồ",
+      500,
+      error.message
+    );
+  }
+};
