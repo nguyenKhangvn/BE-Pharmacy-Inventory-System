@@ -17,7 +17,7 @@ const InventoryLotSchema = new mongoose.Schema(
     quantity: { type: Number, required: true, min: 0, default: 0 },
     unitCost: { type: Number, required: true, min: 0, default: 0 }, // giá vốn theo lô
   },
-  { timestamps: true, versionKey: false }
+  { timestamps: true, versionKey: false, collection: "inventorylots" }
 );
 
 InventoryLotSchema.index(
