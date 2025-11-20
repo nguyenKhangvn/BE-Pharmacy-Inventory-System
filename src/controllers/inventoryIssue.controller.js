@@ -2,6 +2,9 @@ import mongoose from "mongoose";
 import InventoryIssue from "../models/inventoryIssue.model.js";
 import InventoryLot from "../models/inventoryLot.model.js";
 import Product from "../models/product.model.js";
+import Department from "../models/department.model.js";
+import Transaction from "../models/transaction.model.js";
+import TransactionDetail from "../models/transactionDetail.model.js";
 import ApiResponse from "../utils/ApiResponse.js";
 
 class InventoryIssueController {
@@ -241,27 +244,93 @@ class InventoryIssueController {
       }
 
       // --- Create InventoryIssue ---
-      const issueDoc = await InventoryIssue.create(
-        [
-          {
-            warehouseId,
-            department: department.trim(),
-            issueDate: new Date(issueDate),
-            notes: (notes || "").trim(),
-            details: detailsArray,
-            status: "confirmed",
-            createdBy: userId,
-            confirmedBy: userId,
-            confirmedAt: new Date(),
-          },
-        ],
-        { session }
+      // Calculate total amount
+      const totalAmount = detailsArray.reduce(
+        (sum, detail) => sum + detail.lineTotal,
+        0
       );
+
+      // Generate issue code
+      const today = new Date();
+      const year = today.getFullYear();
+      const month = String(today.getMonth() + 1).padStart(2, "0");
+      const day = String(today.getDate()).padStart(2, "0");
+
+      // Get count of today's issues for sequential number
+      const todayStart = new Date(today.setHours(0, 0, 0, 0));
+      const todayEnd = new Date(today.setHours(23, 59, 59, 999));
+      const todayIssuesCount = await InventoryIssue.countDocuments({
+        createdAt: { $gte: todayStart, $lte: todayEnd },
+      }).session(session);
+
+      const sequentialNumber = String(todayIssuesCount + 1).padStart(3, "0");
+      const issueCode = `PX-${year}${month}${day}-${sequentialNumber}`;
+
+      // --- Find or Create Department ---
+      let departmentDoc = await Department.findOne({ 
+        name: department.trim() 
+      }).session(session);
+
+      if (!departmentDoc) {
+        // Tự động tạo department nếu chưa tồn tại
+        const deptCode = department.trim().toUpperCase().replace(/\s+/g, '-');
+        departmentDoc = new Department({
+          code: `DEPT-${deptCode}-${Date.now()}`,
+          name: department.trim(),
+          isActive: true,
+        });
+        await departmentDoc.save({ session });
+      }
+
+      const issue = new InventoryIssue({
+        issueCode,
+        warehouseId,
+        department: department.trim(),
+        issueDate: new Date(issueDate),
+        notes: (notes || "").trim(),
+        details: detailsArray,
+        totalAmount,
+        status: "confirmed",
+        createdBy: userId,
+        confirmedBy: userId,
+        confirmedAt: new Date(),
+      });
+      await issue.save({ session });
+
+      // --- Create Transaction (OUTBOUND) ---
+      const transaction = new Transaction({
+        type: "OUTBOUND",
+        status: "COMPLETED",
+        referenceCode: issueCode,
+        notes: (notes || "").trim(),
+        transactionDate: new Date(issueDate),
+        userId: userId,
+        sourceWarehouseId: warehouseId,
+        departmentId: departmentDoc._id,
+        completedAt: new Date(),
+      });
+      await transaction.save({ session });
+
+      // --- Create TransactionDetails ---
+      const transactionDetails = [];
+      for (const detail of detailsArray) {
+        for (const lotAlloc of detail.lotAllocations) {
+          const txDetail = new TransactionDetail({
+            transactionId: transaction._id,
+            productId: detail.productId,
+            inventoryLotId: lotAlloc.inventoryLotId,
+            quantity: lotAlloc.quantity,
+            unitPrice: detail.unitPrice,
+          });
+          transactionDetails.push(txDetail);
+        }
+      }
+      await TransactionDetail.insertMany(transactionDetails, { session });
 
       await session.commitTransaction();
 
       // --- Response ---
-      const created = issueDoc[0];
+      const created = issue;
       const data = {
         id: String(created._id),
         issueCode: created.issueCode,
@@ -342,12 +411,12 @@ class InventoryIssueController {
         const searchTerm = q.trim();
         const escaped = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         const regex = new RegExp(escaped, "i");
-        query.$or = [{ name: regex }, { code: regex }];
+        query.$or = [{ name: regex }, { sku: regex }];
       }
 
       // Get products
       const products = await Product.find(query)
-        .select("_id code name unit")
+        .select("_id sku name unit")
         .limit(20)
         .lean();
 
@@ -377,7 +446,7 @@ class InventoryIssueController {
 
           return {
             id: String(product._id),
-            code: product.code,
+            sku: product.sku,
             name: product.name,
             unit: product.unit,
             availableQty: stock.stockQty,
