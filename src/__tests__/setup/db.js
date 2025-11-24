@@ -19,5 +19,17 @@ export const closeDatabase = async () => {
 
 export const clearDatabase = async () => {
   const collections = mongoose.connection.collections;
-  await Promise.all(Object.values(collections).map((c) => c.deleteMany({})));
+
+  // Clear all collections except users (to keep test users)
+  const clearPromises = Object.entries(collections).map(
+    ([name, collection]) => {
+      if (name === "users") {
+        // Keep test users by not deleting them
+        return Promise.resolve();
+      }
+      return collection.deleteMany({});
+    }
+  );
+
+  await Promise.all(clearPromises);
 };

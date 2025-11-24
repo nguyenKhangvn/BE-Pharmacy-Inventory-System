@@ -13,6 +13,7 @@ import mongoose from "mongoose";
 import { connect, closeDatabase, clearDatabase } from "./setup/db.js";
 import {
   generateTestToken,
+  createTestUser,
   createCategoryData,
   createProductData,
 } from "./setup/helpers.js";
@@ -27,13 +28,27 @@ app.use("/api/products", productRoutes);
 describe("Product API Tests", () => {
   let authToken;
   let userToken;
+  let adminUser;
+  let normalUser;
 
   beforeAll(async () => {
     process.env.JWT_SECRET = "test-secret";
     await connect();
 
-    authToken = generateTestToken({ role: "admin" });
-    userToken = generateTestToken({ role: "user" });
+    // Create test users in database
+    adminUser = await createTestUser({
+      username: "adminuser",
+      email: "admin@example.com",
+      role: "admin",
+    });
+    normalUser = await createTestUser({
+      username: "normaluser",
+      email: "user@example.com",
+      role: "user",
+    });
+
+    authToken = generateTestToken(adminUser);
+    userToken = generateTestToken(normalUser);
   });
 
   afterAll(async () => {

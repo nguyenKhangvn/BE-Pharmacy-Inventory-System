@@ -12,4 +12,20 @@ router.post(
   TransactionController.create
 );
 
+// GET /api/transactions?type=OUTBOUND&search=&fromDate=&toDate=&page=&limit=
+router.get(
+  "/",
+  auth,
+  roleAuth(["admin", "user"]),
+  TransactionController.getList
+);
+
+// GET /api/transactions/:id?type=OUTBOUND or type=INBOUND
+router.get(
+  "/:id",
+  auth,
+  roleAuth(["admin", "user"]),
+  TransactionController.getById
+);
+
 export default router;
