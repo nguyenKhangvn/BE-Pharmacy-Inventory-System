@@ -3,6 +3,7 @@ import { createInboundTransactionSchema } from "../validators/transaction.valida
 import { createInboundTransaction } from "../services/transaction.service.js";
 import {
   getInboundTransactionById,
+  getInboundTransactions,
   getOutboundTransactions,
   getOutboundTransactionById,
 } from "../services/transaction.query.js";
@@ -93,17 +94,17 @@ class TransactionController {
   }
 
   /**
-   * GET /api/transactions?type=OUTBOUND&search=&fromDate=&toDate=&page=&limit=
-   * Get list of OUTBOUND transactions
+   * GET /api/transactions?type=INBOUND|OUTBOUND&search=&fromDate=&toDate=&page=&limit=
+   * Get list of transactions
    */
   static async getList(req, res) {
     try {
       const { type, search, fromDate, toDate, page, limit } = req.query;
 
-      if (type !== "OUTBOUND") {
+      if (!type || (type !== "INBOUND" && type !== "OUTBOUND")) {
         return ApiResponse.error(
           res,
-          "Only type=OUTBOUND is supported for listing",
+          "type parameter is required (INBOUND or OUTBOUND)",
           400
         );
       }
@@ -116,12 +117,17 @@ class TransactionController {
         limit: limit ? parseInt(limit, 10) : 10,
       };
 
-      const result = await getOutboundTransactions(filters);
+      let result;
+      if (type === "INBOUND") {
+        result = await getInboundTransactions(filters);
+      } else {
+        result = await getOutboundTransactions(filters);
+      }
 
       return ApiResponse.success(
         res,
         result,
-        "OUTBOUND transactions retrieved successfully"
+        `${type} transactions retrieved successfully`
       );
     } catch (err) {
       console.error("Get transaction list error:", err);

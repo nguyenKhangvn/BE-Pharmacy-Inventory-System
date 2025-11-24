@@ -22,6 +22,7 @@ export const createInboundTransactionSchema = Joi.object({
           }),
         sku: Joi.string().optional(),
         unit: Joi.string().optional(),
+        description: Joi.string().allow("").optional(),
         quantity: Joi.number().min(1).required(),
         categoryId: Joi.string().optional(),
         unitPrice: Joi.number().min(0).required(),

@@ -32,6 +32,61 @@ export async function getInboundTransactionById(id) {
 }
 
 /**
+ * Get list of INBOUND transactions with filters and pagination
+ * @param {Object} filters - { search, fromDate, toDate, page, limit }
+ */
+export async function getInboundTransactions(filters = {}) {
+  const { search = "", fromDate, toDate, page = 1, limit = 10 } = filters;
+
+  const query = { type: "INBOUND" };
+
+  // Search by referenceCode or _id
+  if (search && search.trim()) {
+    const searchTrim = search.trim();
+    if (mongoose.isValidObjectId(searchTrim)) {
+      query._id = searchTrim;
+    } else {
+      query.referenceCode = { $regex: searchTrim, $options: "i" };
+    }
+  }
+
+  // Date range filter
+  if (fromDate || toDate) {
+    query.transactionDate = {};
+    if (fromDate) {
+      query.transactionDate.$gte = new Date(fromDate);
+    }
+    if (toDate) {
+      query.transactionDate.$lte = new Date(toDate);
+    }
+  }
+
+  const skip = (page - 1) * limit;
+
+  const [transactions, total] = await Promise.all([
+    Transaction.find(query)
+      .populate({ path: "destinationWarehouseId", select: "code name address" })
+      .populate({ path: "supplierId", select: "code name status" })
+      .populate({ path: "userId", select: "username fullName" })
+      .sort({ transactionDate: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Transaction.countDocuments(query),
+  ]);
+
+  return {
+    transactions,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    },
+  };
+}
+
+/**
  * Get list of OUTBOUND transactions with filters and pagination
  * @param {Object} filters - { search, fromDate, toDate, page, limit }
  */

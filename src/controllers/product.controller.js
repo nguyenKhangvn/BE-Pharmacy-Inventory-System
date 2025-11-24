@@ -56,17 +56,45 @@ class ProductController {
               ...(supplierId
                 ? [{ $match: { supplierId: new ObjectId(supplierId) } }]
                 : []),
+              {
+                $lookup: {
+                  from: "suppliers",
+                  localField: "supplierId",
+                  foreignField: "_id",
+                  as: "supplier",
+                },
+              },
+              { $unwind: { path: "$supplier", preserveNullAndEmptyArrays: true } },
+              {
+                $project: {
+                  _id: 0,
+                  supplierId: 1,
+                  name: "$supplier.name",
+                  code: "$supplier.code",
+                },
+              },
             ],
-            as: "ps",
+            as: "suppliers",
           },
         },
-        ...(supplierId ? [{ $match: { "ps.0": { $exists: true } } }] : []),
-        { $addFields: { suppliersCount: { $size: "$ps" } } },
+        ...(supplierId ? [{ $match: { "suppliers.0": { $exists: true } } }] : []),
+        {
+          $lookup: {
+            from: "inventorylots",
+            let: { pid: "$_id" },
+            pipeline: [
+              { $match: { $expr: { $eq: ["$productId", "$$pid"] } } },
+              { $sort: { expiryDate: 1 } },
+              { $limit: 1 },
+              { $project: { expiryDate: 1, _id: 0 } },
+            ],
+            as: "lotInfo",
+          },
+        },
+        { $addFields: { suppliersCount: { $size: "$suppliers" } } },
         {
           $project: {
-            ps: 0,
             __v: 0,
-            description: 0, // ẩn bớt nếu muốn
           },
         },
       ];
@@ -82,10 +110,13 @@ class ProductController {
               sku: 1,
               name: 1,
               unit: 1,
+              description: 1,
               minimumStock: 1,
               isActive: 1,
               category: { _id: "$category._id", name: "$category.name" },
+              suppliers: 1,
               suppliersCount: 1,
+              expiryDate: { $arrayElemAt: ["$lotInfo.expiryDate", 0] },
               createdAt: 1,
               updatedAt: 1,
             },
@@ -114,10 +145,13 @@ class ProductController {
                   sku: 1,
                   name: 1,
                   unit: 1,
+                  description: 1,
                   minimumStock: 1,
                   isActive: 1,
                   category: { _id: "$category._id", name: "$category.name" },
+                  suppliers: 1,
                   suppliersCount: 1,
+                  expiryDate: { $arrayElemAt: ["$lotInfo.expiryDate", 0] },
                   createdAt: 1,
                   updatedAt: 1,
                 },

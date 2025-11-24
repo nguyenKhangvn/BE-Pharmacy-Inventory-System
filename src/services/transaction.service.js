@@ -7,6 +7,7 @@ import {
   Product,
   Supplier,
   Warehouse,
+  ProductSupplier,
 } from "../models/index.js";
 
 function autoLotNumber() {
@@ -86,7 +87,7 @@ export async function createInboundTransaction(payload, actor) {
               name: row.productName,
               sku: row.sku || `SKU-${Date.now()}`,
               unit: row.unit || "unit",
-              description: row.description || "",
+              description: (row.description && row.description.trim()) || "",
               currentStock: row.quantity,
               categoryId: row.categoryId || null,
               isActive: true,
@@ -97,8 +98,14 @@ export async function createInboundTransaction(payload, actor) {
 
         prod = prod[0];
       } else {
-        // Nếu có rồi: cộng thêm tồn kho
+        // Nếu có rồi: cộng thêm tồn kho và cập nhật description nếu có
         prod.currentStock = (prod.currentStock ?? 0) + row.quantity;
+        
+        // Cập nhật description nếu được cung cấp
+        if (row.description && row.description.trim()) {
+          prod.description = row.description.trim();
+        }
+        
         await prod.save({ session });
       }
 
@@ -126,6 +133,25 @@ export async function createInboundTransaction(payload, actor) {
 
       lot.quantity += row.quantity;
       await lot.save({ session });
+
+      // Lưu ProductSupplier nếu chưa tồn tại
+      const existingPS = await ProductSupplier.findOne({
+        productId: prod._id,
+        supplierId: payload.supplierId,
+      }).session(session);
+
+      if (!existingPS) {
+        await ProductSupplier.create(
+          [
+            {
+              productId: prod._id,
+              supplierId: payload.supplierId,
+              isPrimary: false,
+            },
+          ],
+          { session }
+        );
+      }
 
       detailDocs.push({
         transactionId: tx._id,

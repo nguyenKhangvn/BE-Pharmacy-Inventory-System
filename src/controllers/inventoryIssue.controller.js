@@ -434,14 +434,14 @@ class InventoryIssueController {
             stockValue: 0,
           };
 
-          // Get nearest expiry lot for unit price
+          // Get nearest expiry lot for unit price and lot number
           const nearestLot = await InventoryLot.findOne({
             productId: product._id,
             warehouseId,
             quantity: { $gt: 0 },
           })
             .sort({ expiryDate: 1, createdAt: 1 })
-            .select("unitCost expiryDate")
+            .select("unitCost expiryDate lotNumber")
             .lean();
 
           return {
@@ -452,6 +452,7 @@ class InventoryIssueController {
             availableQty: stock.stockQty,
             unitPrice: nearestLot?.unitCost || 0,
             nearestExpiry: nearestLot?.expiryDate || null,
+            lotNumber: nearestLot?.lotNumber || null,
           };
         })
       );
