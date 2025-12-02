@@ -32,6 +32,13 @@ class InventoryScanner {
       // 2. Quét hạn sử dụng
       await this.scanExpiryDates(results);
 
+      // 3. Calculate total alerts
+      results.totalAlerts =
+        results.lowStock +
+        results.outOfStock +
+        results.expiringSoon +
+        results.expired;
+
       console.log(
         `[InventoryScanner] Scan completed. Results:`,
         JSON.stringify(results, null, 2)
