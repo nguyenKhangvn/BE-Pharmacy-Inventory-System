@@ -8,6 +8,7 @@ import transactionRoutes from "./transaction.route.js";
 import supplierRoutes from "./supplier.routes.js";
 import inventoryIssueRoutes from "./inventoryIssue.route.js";
 import reportRoutes from "./report.route.js";
+import alertRoutes from "./alert.route.js";
 const router = express.Router();
 
 // Mount routes
@@ -19,5 +20,6 @@ router.use("/transactions", transactionRoutes);
 router.use("/suppliers", supplierRoutes);
 router.use("/inventory-issues", inventoryIssueRoutes);
 router.use("/reports", reportRoutes);
+router.use("/alerts", alertRoutes);
 router.use("/", systemRoutes);
 export default router;
