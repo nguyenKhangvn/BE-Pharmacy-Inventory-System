@@ -72,7 +72,144 @@ export const alertController = {
   },
 
   /**
-   * Lấy thống kê alerts
+   * API 1: Lấy tổng hợp 3 số liệu chính
+   * GET /api/alerts/summary
+   */
+  async getSummary(req, res) {
+    try {
+      const stats = await Alert.aggregate([
+        {
+          $match: { status: "ACTIVE" },
+        },
+        {
+          $group: {
+            _id: null,
+            totalAlerts: { $sum: 1 },
+            expiringSoon: {
+              $sum: {
+                $cond: [
+                  {
+                    $in: ["$alertType", ["EXPIRING_SOON", "EXPIRED"]],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+            lowStock: {
+              $sum: {
+                $cond: [
+                  {
+                    $in: ["$alertType", ["LOW_STOCK", "OUT_OF_STOCK"]],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      ]);
+
+      const result =
+        stats.length > 0
+          ? stats[0]
+          : {
+              totalAlerts: 0,
+              expiringSoon: 0,
+              lowStock: 0,
+            };
+
+      res.json({
+        success: true,
+        data: {
+          totalAlerts: result.totalAlerts || 0,
+          expiringSoon: result.expiringSoon || 0,
+          lowStock: result.lowStock || 0,
+        },
+      });
+    } catch (error) {
+      console.error("[AlertController] Error in getSummary:", error);
+      res.status(500).json({
+        success: false,
+        message: "Lỗi khi lấy tổng hợp cảnh báo",
+        error: error.message,
+      });
+    }
+  },
+
+  /**
+   * API 2: Lấy danh sách chi tiết các cảnh báo với search tên thuốc
+   * GET /api/alerts/details
+   */
+  async getDetails(req, res) {
+    try {
+      const {
+        page = 1,
+        limit = 20,
+        search = "",
+        alertType,
+        severity,
+        status = "ACTIVE",
+        sortBy = "createdAt",
+        sortOrder = "desc",
+      } = req.query;
+
+      // Build filter
+      const filter = {};
+      if (alertType) filter.alertType = alertType;
+      if (severity) filter.severity = severity;
+      if (status) filter.status = status;
+
+      // Search tên thuốc
+      if (search && search.trim()) {
+        filter.$or = [
+          { productName: { $regex: search.trim(), $options: "i" } },
+          { productSku: { $regex: search.trim(), $options: "i" } },
+        ];
+      }
+
+      // Build sort
+      const sort = {};
+      sort[sortBy] = sortOrder === "asc" ? 1 : -1;
+
+      // Pagination
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+
+      const [alerts, total] = await Promise.all([
+        Alert.find(filter)
+          .sort(sort)
+          .skip(skip)
+          .limit(parseInt(limit))
+          .populate("productId", "sku name unit minimumStock currentStock")
+          .populate("warehouseId", "name")
+          .populate("inventoryLotId", "lotNumber quantity expiryDate")
+          .lean(),
+        Alert.countDocuments(filter),
+      ]);
+
+      res.json({
+        success: true,
+        data: alerts,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / parseInt(limit)),
+        },
+      });
+    } catch (error) {
+      console.error("[AlertController] Error in getDetails:", error);
+      res.status(500).json({
+        success: false,
+        message: "Lỗi khi lấy danh sách chi tiết cảnh báo",
+        error: error.message,
+      });
+    }
+  },
+
+  /**
+   * Lấy thống kê alerts (API cũ - giữ lại cho backward compatibility)
    * GET /api/alerts/statistics
    */
   async getStatistics(req, res) {
