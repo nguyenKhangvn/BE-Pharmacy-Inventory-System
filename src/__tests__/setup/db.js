@@ -1,29 +1,35 @@
 import mongoose from "mongoose";
-import { MongoMemoryServer } from "mongodb-memory-server";
+import { MongoMemoryReplSet } from "mongodb-memory-server";
 
-let mongoServer;
+let replset;
 
-// Connect to the in-memory database before running tests
 export const connect = async () => {
-  mongoServer = await MongoMemoryServer.create();
-  const uri = mongoServer.getUri();
-
-  await mongoose.connect(uri);
+  replset = await MongoMemoryReplSet.create({
+    replSet: { count: 1, storageEngine: "wiredTiger" },
+  });
+  const uri = replset.getUri();
+  await mongoose.connect(uri, { dbName: "testdb" });
 };
 
-// Close database connection and stop mongo server
 export const closeDatabase = async () => {
   await mongoose.connection.dropDatabase();
   await mongoose.connection.close();
-  await mongoServer.stop();
+  if (replset) await replset.stop();
 };
 
-// Clear all test data after each test
 export const clearDatabase = async () => {
   const collections = mongoose.connection.collections;
 
-  for (const key in collections) {
-    const collection = collections[key];
-    await collection.deleteMany();
-  }
+  // Clear all collections except users (to keep test users)
+  const clearPromises = Object.entries(collections).map(
+    ([name, collection]) => {
+      if (name === "users") {
+        // Keep test users by not deleting them
+        return Promise.resolve();
+      }
+      return collection.deleteMany({});
+    }
+  );
+
+  await Promise.all(clearPromises);
 };

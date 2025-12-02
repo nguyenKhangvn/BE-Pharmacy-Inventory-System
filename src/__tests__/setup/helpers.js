@@ -1,20 +1,41 @@
 import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
 
 /**
- * Generate a test JWT token
- * @param {Object} payload - Token payload
- * @returns {String} JWT token
+ * Create a test user in database
+ * @param {Object} overrides - Override default values
+ * @returns {Promise<Object>} Created user
  */
-export const generateTestToken = (payload = {}) => {
-  const defaultPayload = {
-    id: "507f1f77bcf86cd799439011",
+export const createTestUser = async (overrides = {}) => {
+  const User = mongoose.model("User");
+  const userData = {
+    username: "testuser",
+    fullName: "Test User",
     email: "test@example.com",
-    role: "ADMIN",
-    organizationId: "507f1f77bcf86cd799439012",
-    ...payload,
+    phone: "0123456789",
+    password: "password123",
+    role: "admin",
+    status: "active",
+    ...overrides,
   };
 
-  return jwt.sign(defaultPayload, process.env.JWT_SECRET || "test-secret", {
+  const user = await User.create(userData);
+  return user;
+};
+
+/**
+ * Generate a test JWT token for a user
+ * @param {Object} user - User object from database
+ * @returns {String} JWT token
+ */
+export const generateTestToken = (user) => {
+  const payload = {
+    id: user._id.toString(),
+    email: user.email,
+    role: user.role,
+  };
+
+  return jwt.sign(payload, process.env.JWT_SECRET || "test-secret", {
     expiresIn: "1d",
   });
 };

@@ -3,7 +3,7 @@ import ApiResponse from "../utils/ApiResponse.js";
 
 // Danh sách field được phép sort
 const ALLOWED_SORT_FIELDS = ["createdAt", "name", "lastOrderAt", "code"];
-const ALLOWED_STATUS = ["active", "inactive"];
+const ALLOWED_STATUS = ["active", "locked"];
 
 // Projection fields
 const PROJECTION =

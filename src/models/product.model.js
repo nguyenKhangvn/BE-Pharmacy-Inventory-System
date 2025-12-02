@@ -20,6 +20,17 @@ const ProductSchema = new mongoose.Schema(
       ref: "Category",
       index: true,
     },
+
+    currentStock: {
+      type: Number,
+      default: 0, // số lượng hiện tại trong kho (tổng trên tất cả các lot)
+      min: 0,
+    },
+    averageCost: {
+      type: Number,
+      default: 0, // giá vốn bình quân (nếu sau này cần)
+      min: 0,
+    },
   },
   { timestamps: true, versionKey: false }
 );

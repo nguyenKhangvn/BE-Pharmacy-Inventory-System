@@ -12,6 +12,7 @@ import mongoose from "mongoose";
 import { connect, closeDatabase, clearDatabase } from "./setup/db.js";
 import {
   generateTestToken,
+  createTestUser,
   createCategoryData,
   createProductData,
 } from "./setup/helpers.js";
@@ -24,9 +25,10 @@ app.use(express.json());
 app.use("/api/categories", categoryRoutes);
 
 describe("Category API Tests", () => {
-  let authToken;
-  let managerToken;
-  let pharmacistToken;
+  let adminToken;
+  let userToken;
+  let adminUser;
+  let normalUser;
 
   beforeAll(async () => {
     // Set JWT_SECRET for testing environment
@@ -34,10 +36,21 @@ describe("Category API Tests", () => {
 
     await connect();
 
+    // Create test users in database
+    adminUser = await createTestUser({
+      username: "adminuser",
+      email: "admin@example.com",
+      role: "admin",
+    });
+    normalUser = await createTestUser({
+      username: "normaluser",
+      email: "user@example.com",
+      role: "user",
+    });
+
     // Generate tokens for different roles
-    authToken = generateTestToken({ role: "ADMIN" });
-    managerToken = generateTestToken({ role: "MANAGER" });
-    pharmacistToken = generateTestToken({ role: "PHARMACIST" });
+    adminToken = generateTestToken(adminUser);
+    userToken = generateTestToken(normalUser);
   });
 
   afterAll(async () => {
@@ -54,7 +67,7 @@ describe("Category API Tests", () => {
 
       const response = await request(app)
         .post("/api/categories")
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .send(categoryData)
         .expect(201);
 
@@ -64,18 +77,6 @@ describe("Category API Tests", () => {
       expect(response.body.data.name).toBe(categoryData.name);
       expect(response.body.data.code).toBe(categoryData.code);
       expect(response.body.data.productCount).toBe(0);
-    });
-
-    it("should create category with MANAGER role", async () => {
-      const categoryData = createCategoryData();
-
-      const response = await request(app)
-        .post("/api/categories")
-        .set("Authorization", `Bearer ${managerToken}`)
-        .send(categoryData)
-        .expect(201);
-
-      expect(response.body.success).toBe(true);
     });
 
     it("should fail to create category without authentication", async () => {
@@ -89,12 +90,12 @@ describe("Category API Tests", () => {
       expect(response.body.message).toBe("No token, authorization denied");
     });
 
-    it("should fail to create category with PHARMACIST role", async () => {
+    it("should fail to create category with user role (only admin allowed)", async () => {
       const categoryData = createCategoryData();
 
       const response = await request(app)
         .post("/api/categories")
-        .set("Authorization", `Bearer ${pharmacistToken}`)
+        .set("Authorization", `Bearer ${userToken}`)
         .send(categoryData)
         .expect(403);
 
@@ -113,7 +114,7 @@ describe("Category API Tests", () => {
       // Try to create duplicate
       const response = await request(app)
         .post("/api/categories")
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .send(createCategoryData({ code: "CAT002" }))
         .expect(400);
 
@@ -132,7 +133,7 @@ describe("Category API Tests", () => {
       // Try to create duplicate
       const response = await request(app)
         .post("/api/categories")
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .send(createCategoryData({ name: "Different Name" }))
         .expect(400);
 
@@ -145,7 +146,7 @@ describe("Category API Tests", () => {
     it("should fail validation with missing required fields", async () => {
       const response = await request(app)
         .post("/api/categories")
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .send({})
         .expect(400);
 
@@ -157,7 +158,7 @@ describe("Category API Tests", () => {
     it("should fail validation with invalid data types", async () => {
       const response = await request(app)
         .post("/api/categories")
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .send({
           code: "CAT001",
           name: "Test Category",
@@ -181,7 +182,7 @@ describe("Category API Tests", () => {
 
       const response = await request(app)
         .get("/api/categories")
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .query({ page: 1, limit: 2 })
         .expect(200);
 
@@ -204,7 +205,7 @@ describe("Category API Tests", () => {
 
       const response = await request(app)
         .get("/api/categories")
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .query({ search: "Anti" })
         .expect(200);
 
@@ -233,7 +234,7 @@ describe("Category API Tests", () => {
 
       const response = await request(app)
         .get("/api/categories")
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .query({ isActive: "true" })
         .expect(200);
 
@@ -253,7 +254,7 @@ describe("Category API Tests", () => {
 
       const response = await request(app)
         .get("/api/categories")
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .expect(200);
 
       expect(response.body.success).toBe(true);
@@ -278,7 +279,7 @@ describe("Category API Tests", () => {
 
       const response = await request(app)
         .get("/api/categories/non-pagination")
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .expect(200);
 
       expect(response.body.success).toBe(true);
@@ -295,7 +296,7 @@ describe("Category API Tests", () => {
 
       const response = await request(app)
         .get("/api/categories/non-pagination")
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .expect(200);
 
       expect(response.body.data[0].name).toBe("Aspirin");
@@ -324,7 +325,7 @@ describe("Category API Tests", () => {
 
       const response = await request(app)
         .get("/api/categories/non-pagination")
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .query({ isActive: "true" })
         .expect(200);
 
@@ -339,7 +340,7 @@ describe("Category API Tests", () => {
 
       const response = await request(app)
         .get(`/api/categories/${category._id}`)
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .expect(200);
 
       expect(response.body.success).toBe(true);
@@ -359,7 +360,7 @@ describe("Category API Tests", () => {
 
       const response = await request(app)
         .get(`/api/categories/${category._id}`)
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .expect(200);
 
       expect(response.body.data.productCount).toBe(3);
@@ -370,7 +371,7 @@ describe("Category API Tests", () => {
 
       const response = await request(app)
         .get(`/api/categories/${fakeId}`)
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .expect(404);
 
       expect(response.body.success).toBe(false);
@@ -380,7 +381,7 @@ describe("Category API Tests", () => {
     it("should return 400 for invalid ID format", async () => {
       const response = await request(app)
         .get("/api/categories/invalid-id")
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .expect(400);
 
       expect(response.body.success).toBe(false);
@@ -399,7 +400,7 @@ describe("Category API Tests", () => {
 
       const response = await request(app)
         .put(`/api/categories/${category._id}`)
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .send(updateData)
         .expect(200);
 
@@ -408,28 +409,19 @@ describe("Category API Tests", () => {
       expect(response.body.data.description).toBe(updateData.description);
     });
 
-    it("should update with MANAGER role", async () => {
+    it("should fail to update with user role (only admin allowed)", async () => {
       const category = await Category.create(createCategoryData());
 
       const response = await request(app)
         .put(`/api/categories/${category._id}`)
-        .set("Authorization", `Bearer ${managerToken}`)
-        .send({ name: "Updated Name" })
-        .expect(200);
-
-      expect(response.body.success).toBe(true);
-    });
-
-    it("should fail with PHARMACIST role", async () => {
-      const category = await Category.create(createCategoryData());
-
-      const response = await request(app)
-        .put(`/api/categories/${category._id}`)
-        .set("Authorization", `Bearer ${pharmacistToken}`)
+        .set("Authorization", `Bearer ${userToken}`)
         .send({ name: "Updated Name" })
         .expect(403);
 
       expect(response.body.success).toBe(false);
+      expect(response.body.message).toBe(
+        "Access denied. Insufficient permissions."
+      );
     });
 
     it("should fail to update with duplicate name", async () => {
@@ -442,7 +434,7 @@ describe("Category API Tests", () => {
 
       const response = await request(app)
         .put(`/api/categories/${category1._id}`)
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .send({ name: "Category 2" })
         .expect(400);
 
@@ -462,7 +454,7 @@ describe("Category API Tests", () => {
 
       const response = await request(app)
         .put(`/api/categories/${category1._id}`)
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .send({ code: "CAT002" })
         .expect(400);
 
@@ -477,7 +469,7 @@ describe("Category API Tests", () => {
 
       const response = await request(app)
         .put(`/api/categories/${fakeId}`)
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .send({ name: "Updated Name" })
         .expect(404);
 
@@ -492,7 +484,7 @@ describe("Category API Tests", () => {
 
       const response = await request(app)
         .delete(`/api/categories/${category._id}`)
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .expect(200);
 
       expect(response.body.success).toBe(true);
@@ -514,7 +506,7 @@ describe("Category API Tests", () => {
 
       const response = await request(app)
         .delete(`/api/categories/${category._id}`)
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .expect(400);
 
       expect(response.body.success).toBe(false);
@@ -526,26 +518,18 @@ describe("Category API Tests", () => {
       expect(existingCategory).not.toBeNull();
     });
 
-    it("should fail with MANAGER role", async () => {
+    it("should fail to delete with user role (only admin allowed)", async () => {
       const category = await Category.create(createCategoryData());
 
       const response = await request(app)
         .delete(`/api/categories/${category._id}`)
-        .set("Authorization", `Bearer ${managerToken}`)
+        .set("Authorization", `Bearer ${userToken}`)
         .expect(403);
 
       expect(response.body.success).toBe(false);
-    });
-
-    it("should fail with PHARMACIST role", async () => {
-      const category = await Category.create(createCategoryData());
-
-      const response = await request(app)
-        .delete(`/api/categories/${category._id}`)
-        .set("Authorization", `Bearer ${pharmacistToken}`)
-        .expect(403);
-
-      expect(response.body.success).toBe(false);
+      expect(response.body.message).toBe(
+        "Access denied. Insufficient permissions."
+      );
     });
 
     it("should return 404 for non-existent category", async () => {
@@ -553,7 +537,7 @@ describe("Category API Tests", () => {
 
       const response = await request(app)
         .delete(`/api/categories/${fakeId}`)
-        .set("Authorization", `Bearer ${authToken}`)
+        .set("Authorization", `Bearer ${adminToken}`)
         .expect(404);
 
       expect(response.body.success).toBe(false);
