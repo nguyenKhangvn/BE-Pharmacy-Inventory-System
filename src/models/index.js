@@ -9,3 +9,4 @@ export { default as TransactionDetail } from "./transactionDetail.model.js";
 export { default as Category } from "./category.model.js";
 export { default as Department } from "./department.model.js";
 export { default as ProductSupplier } from "./productSupplier.mode.js";
+export { default as Alert } from "./alert.model.js";
