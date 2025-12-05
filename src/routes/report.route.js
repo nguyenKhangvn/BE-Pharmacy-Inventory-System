@@ -1,5 +1,5 @@
 import express from "express";
-import { getStockSummary, getTrends, getStatusDistribution, exportReport } from "../controllers/report.controller.js";
+import { getStockSummary, getTrends, getStatusDistribution, exportReport, exportReportFile } from "../controllers/report.controller.js";
 import auth from "../middleware/auth.js";
 import roleAuth from "../middleware/roleAuth.js";
 
@@ -36,13 +36,13 @@ router.get(
 );
 
 // @route GET /api/reports/export
-// @desc Export report to PDF file
+// @desc Export report to Excel or PDF file
 // @access Private (admin, user)
 router.get(
   "/export",
   auth,
   roleAuth(["admin", "user"]),
-  exportReport
+  exportReportFile
 );
 
 export default router;
