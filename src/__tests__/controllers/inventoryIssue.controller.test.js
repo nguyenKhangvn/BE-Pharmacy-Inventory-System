@@ -1013,6 +1013,7 @@ describe('InventoryIssueController.getProductSuggestions', () => {
       lean: jest.fn().mockResolvedValue({
         unitCost: 4500,
         expiryDate: new Date('2026-01-01'),
+        lotNumber: 'LOT001',
       }),
     });
 
@@ -1031,6 +1032,7 @@ describe('InventoryIssueController.getProductSuggestions', () => {
           availableQty: 1000,
           unitPrice: 4500,
           nearestExpiry: expect.any(Date),
+          lotNumber: 'LOT001',
         },
       ],
     });
@@ -1081,6 +1083,7 @@ describe('InventoryIssueController.getProductSuggestions', () => {
           availableQty: 0,
           unitPrice: 0,
           nearestExpiry: null,
+          lotNumber: null,
         },
       ],
     });
