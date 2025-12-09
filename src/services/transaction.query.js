@@ -1,5 +1,35 @@
 import mongoose from "mongoose";
-import { Transaction, TransactionDetail } from "../models/index.js";
+import {
+  Transaction,
+  TransactionDetail,
+  InventoryLot,
+} from "../models/index.js"; // <--- ĐÃ THÊM InventoryLot
+
+/**
+ * Helper: Tìm danh sách TransactionID có chứa Lot Number khớp từ khóa
+ * Logic: Tìm trong InventoryLot trước -> Lấy ID -> Tìm trong TransactionDetail
+ */
+async function findTransactionIdsByLotNumber(searchString) {
+  if (!searchString) return [];
+
+  // 1. Tìm các lô trong bảng InventoryLot khớp với từ khóa
+  const lots = await InventoryLot.find({
+    lotNumber: { $regex: searchString, $options: "i" },
+  }).select("_id");
+
+  const lotIds = lots.map((l) => l._id);
+  if (lotIds.length === 0) return [];
+
+  // 2. Tìm các chi tiết giao dịch có chứa các inventoryLotId này
+  const details = await TransactionDetail.find({
+    inventoryLotId: { $in: lotIds },
+  })
+    .select("transactionId")
+    .lean();
+
+  // 3. Trả về danh sách transactionId
+  return details.map((d) => d.transactionId);
+}
 
 export async function getInboundTransactionById(id) {
   if (!mongoose.isValidObjectId(id)) {
@@ -11,6 +41,7 @@ export async function getInboundTransactionById(id) {
   const tx = await Transaction.findOne({ _id: id, type: "INBOUND" })
     .populate({ path: "destinationWarehouseId", select: "code name address" })
     .populate({ path: "supplierId", select: "code name status" })
+    .populate({ path: "userId", select: "username fullName" })
     .lean();
 
   if (!tx) {
@@ -19,7 +50,6 @@ export async function getInboundTransactionById(id) {
     throw err;
   }
 
-  // Details: populate product, lot (tuỳ bạn có cần)
   const details = await TransactionDetail.find({ transactionId: id })
     .populate({ path: "productId", select: "sku name unit" })
     .populate({
@@ -33,24 +63,64 @@ export async function getInboundTransactionById(id) {
 
 /**
  * Get list of INBOUND transactions with filters and pagination
- * @param {Object} filters - { search, fromDate, toDate, page, limit }
  */
 export async function getInboundTransactions(filters = {}) {
-  const { search = "", fromDate, toDate, page = 1, limit = 10 } = filters;
+  const {
+    search = "",
+    fromDate,
+    toDate,
+    page = 1,
+    limit = 10,
+    lotNumber,
+  } = filters;
 
   const query = { type: "INBOUND" };
+  const searchConditions = [];
 
-  // Search by referenceCode or _id
+  // --- 1. XỬ LÝ TÌM KIẾM CHUNG (SEARCH BAR) ---
   if (search && search.trim()) {
     const searchTrim = search.trim();
+
+    // A. Tìm theo ID Transaction
     if (mongoose.isValidObjectId(searchTrim)) {
-      query._id = searchTrim;
-    } else {
-      query.referenceCode = { $regex: searchTrim, $options: "i" };
+      searchConditions.push({ _id: searchTrim });
+    }
+
+    // B. Tìm theo Mã phiếu (Reference Code)
+    searchConditions.push({
+      referenceCode: { $regex: searchTrim, $options: "i" },
+    });
+
+    // C. Tìm theo Số Lô (Sử dụng Helper đã fix)
+    const txIdsByLot = await findTransactionIdsByLotNumber(searchTrim);
+    if (txIdsByLot.length > 0) {
+      searchConditions.push({ _id: { $in: txIdsByLot } });
+    }
+
+    if (searchConditions.length > 0) {
+      query.$or = searchConditions;
     }
   }
 
-  // Date range filter
+  // --- 2. XỬ LÝ LỌC CỤ THỂ THEO LOT (DROPDOWN/PARAM) ---
+  if (lotNumber && lotNumber.trim()) {
+    // Tái sử dụng helper để tìm ID giao dịch chứa lô này
+    const txIds = await findTransactionIdsByLotNumber(lotNumber.trim());
+
+    if (txIds.length > 0) {
+      // Dùng $and để giao với các điều kiện tìm kiếm ở trên (nếu có)
+      if (!query.$and) query.$and = [];
+      query.$and.push({ _id: { $in: txIds } });
+    } else {
+      // Tìm không thấy lô nào -> Trả về danh sách rỗng
+      return {
+        transactions: [],
+        pagination: { page, limit, total: 0, totalPages: 0 },
+      };
+    }
+  }
+
+  // --- 3. FILTER DATE ---
   if (fromDate || toDate) {
     query.transactionDate = {};
     if (fromDate) {
@@ -75,8 +145,37 @@ export async function getInboundTransactions(filters = {}) {
     Transaction.countDocuments(query),
   ]);
 
+  // --- 4. GẮN LOT NUMBERS VÀO KẾT QUẢ ---
+  const txIds = transactions.map((tx) => tx._id);
+
+  // Lấy chi tiết để hiển thị số lô ra ngoài bảng
+  const details = await TransactionDetail.find({
+    transactionId: { $in: txIds },
+  })
+    .populate({ path: "inventoryLotId", select: "lotNumber" }) // Populate lấy số lô
+    .select("transactionId inventoryLotId")
+    .lean();
+
+  const lotMap = {};
+  details.forEach((d) => {
+    const txId = String(d.transactionId);
+    if (!lotMap[txId]) lotMap[txId] = [];
+
+    // Lấy lotNumber từ object đã populate
+    const lotNum = d.inventoryLotId?.lotNumber;
+
+    if (lotNum && !lotMap[txId].includes(lotNum)) {
+      lotMap[txId].push(lotNum);
+    }
+  });
+
+  const transactionsWithLots = transactions.map((tx) => ({
+    ...tx,
+    lotNumbers: lotMap[String(tx._id)] || [],
+  }));
+
   return {
-    transactions,
+    transactions: transactionsWithLots,
     pagination: {
       page,
       limit,
@@ -88,24 +187,56 @@ export async function getInboundTransactions(filters = {}) {
 
 /**
  * Get list of OUTBOUND transactions with filters and pagination
- * @param {Object} filters - { search, fromDate, toDate, page, limit }
  */
 export async function getOutboundTransactions(filters = {}) {
-  const { search = "", fromDate, toDate, page = 1, limit = 10 } = filters;
+  const {
+    search = "",
+    fromDate,
+    toDate,
+    page = 1,
+    limit = 10,
+    lotNumber,
+  } = filters;
 
   const query = { type: "OUTBOUND" };
+  const searchConditions = [];
 
-  // Search by referenceCode or _id
+  // --- 1. XỬ LÝ TÌM KIẾM CHUNG ---
   if (search && search.trim()) {
     const searchTrim = search.trim();
     if (mongoose.isValidObjectId(searchTrim)) {
-      query._id = searchTrim;
-    } else {
-      query.referenceCode = { $regex: searchTrim, $options: "i" };
+      searchConditions.push({ _id: searchTrim });
+    }
+    searchConditions.push({
+      referenceCode: { $regex: searchTrim, $options: "i" },
+    });
+
+    // Tìm theo Số Lô (Helper đã fix)
+    const txIdsByLot = await findTransactionIdsByLotNumber(searchTrim);
+    if (txIdsByLot.length > 0) {
+      searchConditions.push({ _id: { $in: txIdsByLot } });
+    }
+
+    if (searchConditions.length > 0) {
+      query.$or = searchConditions;
     }
   }
 
-  // Date range filter
+  // --- 2. XỬ LÝ LỌC CỤ THỂ THEO LOT ---
+  if (lotNumber && lotNumber.trim()) {
+    const txIds = await findTransactionIdsByLotNumber(lotNumber.trim());
+    if (txIds.length > 0) {
+      if (!query.$and) query.$and = [];
+      query.$and.push({ _id: { $in: txIds } });
+    } else {
+      return {
+        transactions: [],
+        pagination: { page, limit, total: 0, totalPages: 0 },
+      };
+    }
+  }
+
+  // --- 3. FILTER DATE ---
   if (fromDate || toDate) {
     query.transactionDate = {};
     if (fromDate) {
@@ -130,8 +261,32 @@ export async function getOutboundTransactions(filters = {}) {
     Transaction.countDocuments(query),
   ]);
 
+  // --- 4. GẮN LOT NUMBERS VÀO KẾT QUẢ ---
+  const txIds = transactions.map((tx) => tx._id);
+  const details = await TransactionDetail.find({
+    transactionId: { $in: txIds },
+  })
+    .populate({ path: "inventoryLotId", select: "lotNumber" })
+    .select("transactionId inventoryLotId")
+    .lean();
+
+  const lotMap = {};
+  details.forEach((d) => {
+    const txId = String(d.transactionId);
+    if (!lotMap[txId]) lotMap[txId] = [];
+    const lotNum = d.inventoryLotId?.lotNumber;
+    if (lotNum && !lotMap[txId].includes(lotNum)) {
+      lotMap[txId].push(lotNum);
+    }
+  });
+
+  const transactionsWithLots = transactions.map((tx) => ({
+    ...tx,
+    lotNumbers: lotMap[String(tx._id)] || [],
+  }));
+
   return {
-    transactions,
+    transactions: transactionsWithLots,
     pagination: {
       page,
       limit,
@@ -143,7 +298,6 @@ export async function getOutboundTransactions(filters = {}) {
 
 /**
  * Get OUTBOUND transaction by ID with details
- * @param {String} id - Transaction ID
  */
 export async function getOutboundTransactionById(id) {
   if (!mongoose.isValidObjectId(id)) {
@@ -164,7 +318,6 @@ export async function getOutboundTransactionById(id) {
     throw err;
   }
 
-  // Get transaction details
   const details = await TransactionDetail.find({ transactionId: id })
     .populate({ path: "productId", select: "sku name unit" })
     .populate({

@@ -4,6 +4,7 @@ import Product from "../models/product.model.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import mongoose from "mongoose";
 import PDFDocument from "pdfkit";
+import ExcelJS from "exceljs";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
@@ -194,6 +195,44 @@ async function calculateStockAtDate(productId, date) {
   const totalOutbound = outbound.length > 0 ? outbound[0].totalQuantity : 0;
 
   return totalInbound - totalOutbound;
+}
+
+/**
+ * Calculate total transaction quantity for a product (all time)
+ * @param {ObjectId} productId
+ * @param {String} transactionType - INBOUND or OUTBOUND
+ * @returns {Number} Total quantity
+ */
+async function calculateTransactionTotalAllTime(
+  productId,
+  transactionType
+) {
+  const result = await TransactionDetail.aggregate([
+    {
+      $lookup: {
+        from: "transactions",
+        localField: "transactionId",
+        foreignField: "_id",
+        as: "transaction",
+      },
+    },
+    { $unwind: "$transaction" },
+    {
+      $match: {
+        productId: new mongoose.Types.ObjectId(productId),
+        "transaction.type": transactionType,
+        "transaction.status": "COMPLETED",
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        totalQuantity: { $sum: "$quantity" },
+      },
+    },
+  ]);
+
+  return result.length > 0 ? result[0].totalQuantity : 0;
 }
 
 /**
@@ -621,7 +660,7 @@ export const exportReport = async (req, res) => {
 
     // 3. Đăng ký Font tiếng Việt (QUAN TRỌNG)
     if (fs.existsSync(FONT_REGULAR) && fs.existsSync(FONT_BOLD)) {
-      doc.registerFont("Roboto", FONT_REGULAR);
+      doc.registerFont("Roboto-Regular", FONT_REGULAR);
       doc.registerFont("Roboto-Bold", FONT_BOLD);
     } else {
       console.warn("Không tìm thấy file font Roboto, sử dụng font mặc định.");
@@ -651,6 +690,48 @@ export const exportReport = async (req, res) => {
  * Get stock summary data for export
  */
 async function getStockSummaryData(startDate, endDate) {
+  // Nếu không có ngày, lấy toàn bộ dữ liệu
+  if (!startDate || !endDate) {
+    // Lấy tất cả products
+    const products = await Product.find({}).select("_id name unit").lean();
+    
+    const stockSummary = await Promise.all(
+      products.map(async (product) => {
+        const totalInbound = await calculateTransactionTotalAllTime(
+          product._id,
+          "INBOUND"
+        );
+        const totalOutbound = await calculateTransactionTotalAllTime(
+          product._id,
+          "OUTBOUND"
+        );
+        const closingStock = totalInbound - totalOutbound;
+
+        return {
+          productName: product.name,
+          unit: product.unit,
+          openingStock: 0,
+          totalInbound,
+          totalOutbound,
+          closingStock,
+        };
+      })
+    );
+
+    const activeProducts = stockSummary.filter(
+      (item) =>
+        item.totalInbound > 0 ||
+        item.totalOutbound > 0 ||
+        item.closingStock > 0
+    );
+
+    return {
+      startDate: null,
+      endDate: null,
+      products: activeProducts,
+    };
+  }
+
   const start = new Date(startDate);
   const end = new Date(endDate);
 
@@ -713,6 +794,15 @@ async function getStockSummaryData(startDate, endDate) {
  * Get trends data for export
  */
 async function getTrendsData(startDate, endDate) {
+  // Nếu không có ngày, trả về mảng rỗng
+  if (!startDate || !endDate) {
+    return {
+      startDate: null,
+      endDate: null,
+      trends: [],
+    };
+  }
+
   const start = new Date(startDate);
   const end = new Date(endDate);
 
@@ -934,13 +1024,17 @@ async function getStatusDistributionData(startDate, endDate) {
  * Generate PDF content based on report type
  */
 function generatePDFContent(doc, reportType, data, title, startDate, endDate) {
+  // Determine fonts based on registration
+  const fontBold = fs.existsSync(FONT_BOLD) ? "Roboto-Bold" : "Helvetica-Bold";
+  const fontRegular = fs.existsSync(FONT_REGULAR) ? "Roboto-Regular" : "Helvetica";
+
   // Header Report
-  doc.font("Roboto-Bold").fontSize(18).text(title, { align: "center" });
+  doc.font(fontBold).fontSize(18).text(title, { align: "center" });
   doc.moveDown(0.5);
 
   if (startDate && endDate) {
     doc
-      .font("Roboto")
+      .font(fontRegular)
       .fontSize(11)
       .text(
         `Từ ngày: ${new Date(startDate).toLocaleDateString("vi-VN")} - Đến ngày: ${new Date(endDate).toLocaleDateString("vi-VN")}`,
@@ -955,16 +1049,19 @@ function generatePDFContent(doc, reportType, data, title, startDate, endDate) {
     });
   doc.moveDown(2);
 
+  // Prepare fonts object for table generation
+  const fonts = { regular: fontRegular, bold: fontBold };
+
   // Chọn hàm vẽ bảng tương ứng
   switch (reportType) {
     case "stock_summary":
-      generateStockSummaryTable(doc, data);
+      generateStockSummaryTable(doc, data, fonts);
       break;
     case "trends":
-      generateTrendsTable(doc, data);
+      generateTrendsTable(doc, data, fonts);
       break;
     case "status_distribution":
-      generateStatusDistributionTable(doc, data);
+      generateStatusDistributionTable(doc, data, fonts);
       break;
   }
 
@@ -983,14 +1080,14 @@ function generatePDFContent(doc, reportType, data, title, startDate, endDate) {
 /**
  * Core function to draw formatted table with headers and rows
  */
-function drawTable(doc, headers, rows, colWidths) {
+function drawTable(doc, headers, rows, colWidths, fonts = { regular: "Helvetica", bold: "Helvetica-Bold" }) {
   const startX = 30;
   let startY = doc.y;
   const rowHeight = 25; // Chiều cao mỗi dòng
   const usableWidth = doc.page.width - 60;
 
   // 1. Vẽ Header
-  doc.font("Roboto-Bold").fontSize(9);
+  doc.font(fonts.bold).fontSize(9);
 
   // Vẽ nền header
   doc
@@ -1010,7 +1107,7 @@ function drawTable(doc, headers, rows, colWidths) {
   });
 
   startY += rowHeight;
-  doc.font("Roboto").fontSize(9);
+  doc.font(fonts.regular).fontSize(9);
 
   // 2. Vẽ Rows
   rows.forEach((row, rowIndex) => {
@@ -1020,7 +1117,7 @@ function drawTable(doc, headers, rows, colWidths) {
       startY = 30; // Reset Y về đầu trang mới
 
       // Vẽ lại header ở trang mới
-      doc.font("Roboto-Bold").fontSize(9);
+      doc.font(fonts.bold).fontSize(9);
       doc
         .fillColor("#eeeeee")
         .rect(startX, startY, usableWidth, rowHeight)
@@ -1036,7 +1133,7 @@ function drawTable(doc, headers, rows, colWidths) {
         hX += colWidths[i];
       });
       startY += rowHeight;
-      doc.font("Roboto").fontSize(9);
+      doc.font(fonts.regular).fontSize(9);
     }
 
     // Vẽ màu nền xen kẽ (Zebra striping)
@@ -1079,10 +1176,10 @@ function drawTable(doc, headers, rows, colWidths) {
 /**
  * Generate Stock Summary table
  */
-function generateStockSummaryTable(doc, data) {
+function generateStockSummaryTable(doc, data, fonts = { regular: "Helvetica", bold: "Helvetica-Bold" }) {
   doc
     .fontSize(12)
-    .font("Roboto-Bold")
+    .font(fonts.bold)
     .text(`Tổng số sản phẩm: ${data.products.length}`);
   doc.moveDown(1);
 
@@ -1108,16 +1205,16 @@ function generateStockSummaryTable(doc, data) {
     p.closingStock.toString(),
   ]);
 
-  drawTable(doc, headers, rows, colWidths);
+  drawTable(doc, headers, rows, colWidths, fonts);
 }
 
 /**
  * Generate Trends table
  */
-function generateTrendsTable(doc, data) {
+function generateTrendsTable(doc, data, fonts = { regular: "Helvetica", bold: "Helvetica-Bold" }) {
   doc
     .fontSize(12)
-    .font("Roboto-Bold")
+    .font(fonts.bold)
     .text(`Tổng số tháng: ${data.trends.length}`);
   doc.moveDown(1);
 
@@ -1142,16 +1239,16 @@ function generateTrendsTable(doc, data) {
     (t.inbound.transactionCount + t.outbound.transactionCount).toString(),
   ]);
 
-  drawTable(doc, headers, rows, colWidths);
+  drawTable(doc, headers, rows, colWidths, fonts);
 }
 
 /**
  * Generate Status Distribution table
  */
-function generateStatusDistributionTable(doc, data) {
+function generateStatusDistributionTable(doc, data, fonts = { regular: "Helvetica", bold: "Helvetica-Bold" }) {
   doc
     .fontSize(12)
-    .font("Roboto-Bold")
+    .font(fonts.bold)
     .text(`Tổng số giao dịch: ${data.totalTransactions}`);
   doc.moveDown(1);
 
@@ -1171,5 +1268,351 @@ function generateStatusDistributionTable(doc, data) {
     `${item.percentage}%`,
   ]);
 
-  drawTable(doc, headers, rows, colWidths);
+  drawTable(doc, headers, rows, colWidths, fonts);
 }
+
+/**
+ * Export report in Excel or PDF format
+ * @route GET /api/reports/export?type=excel&startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+ */
+async function exportReportFile(req, res) {
+  try {
+    const { type = "excel", startDate, endDate } = req.query;
+
+    // Validate export type
+    if (!["excel", "pdf"].includes(type)) {
+      return ApiResponse.badRequest(
+        res,
+        "Invalid export type. Use 'excel' or 'pdf'"
+      );
+    }
+
+    // Validate date range
+    if (
+      startDate &&
+      (isNaN(Date.parse(startDate)) || !/^\d{4}-\d{2}-\d{2}$/.test(startDate))
+    ) {
+      return ApiResponse.badRequest(res, "Invalid startDate format (YYYY-MM-DD)");
+    }
+    if (
+      endDate &&
+      (isNaN(Date.parse(endDate)) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate))
+    ) {
+      return ApiResponse.badRequest(res, "Invalid endDate format (YYYY-MM-DD)");
+    }
+    if (startDate && endDate && new Date(startDate) > new Date(endDate)) {
+      return ApiResponse.badRequest(res, "startDate must be before endDate");
+    }
+
+    // Get report data
+    const stockData = await getStockSummaryData(startDate, endDate);
+    const trendsData = await getTrendsData(startDate, endDate);
+    const statusData = await getStatusDistributionData(startDate, endDate);
+
+    // Enhance stock data with value and status
+    const productsWithDetails = await Promise.all(
+      stockData.products.map(async (product) => {
+        // Get product details for averageCost, minimumStock, reorderLevel
+        const productDoc = await Product.findOne({ name: product.productName }).lean();
+        const value = product.closingStock * (productDoc?.averageCost || 0);
+        
+        // Determine status
+        let status = "Bình thường";
+        if (product.closingStock === 0) {
+          status = "Hết hàng";
+        } else if (productDoc && product.closingStock <= productDoc.minimumStock) {
+          status = "Rất thấp";
+        } else if (productDoc && product.closingStock <= productDoc.reorderLevel) {
+          status = "Thấp";
+        }
+
+        return {
+          ...product,
+          value,
+          status,
+        };
+      })
+    );
+
+    const enhancedStockData = {
+      ...stockData,
+      products: productsWithDetails,
+    };
+
+    if (type === "excel") {
+      await exportToExcel(res, enhancedStockData, trendsData, statusData, startDate, endDate);
+    } else {
+      await exportToPDF(res, enhancedStockData, trendsData, statusData, startDate, endDate);
+    }
+  } catch (error) {
+    console.error("Export report error:", error);
+    return ApiResponse.error(
+      res,
+      "Error exporting report",
+      500,
+      error.message
+    );
+  }
+}
+
+/**
+ * Export to Excel format
+ */
+async function exportToExcel(res, stockData, trendsData, statusData, startDate, endDate) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "Pharmacy Inventory System";
+  workbook.created = new Date();
+
+  // Sheet 1: Stock Summary
+  const stockSheet = workbook.addWorksheet("Báo Cáo Tồn Kho");
+
+  // Title
+  stockSheet.mergeCells("A1:I1");
+  stockSheet.getCell("A1").value = "BÁO CÁO TỒN KHO";
+  stockSheet.getCell("A1").font = { size: 16, bold: true };
+  stockSheet.getCell("A1").alignment = { horizontal: "center", vertical: "middle" };
+
+  // Date range
+  const dateRangeText = `Từ ngày: ${startDate || "N/A"} - Đến ngày: ${endDate || "N/A"}`;
+  stockSheet.mergeCells("A2:I2");
+  stockSheet.getCell("A2").value = dateRangeText;
+  stockSheet.getCell("A2").alignment = { horizontal: "center", vertical: "middle" };
+
+  // Headers
+  stockSheet.getRow(4).values = [
+    "STT",
+    "Tên thuốc",
+    "Đơn vị",
+    "Tồn đầu kỳ",
+    "Tổng nhập",
+    "Tổng xuất",
+    "Tồn cuối kỳ",
+    "Giá trị (VNĐ)",
+    "Trạng thái",
+  ];
+  stockSheet.getRow(4).font = { bold: true };
+  stockSheet.getRow(4).alignment = { horizontal: "center", vertical: "middle" };
+  stockSheet.getRow(4).fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FFD9EAD3" },
+  };
+
+  // Column widths
+  stockSheet.columns = [
+    { width: 6 },  // STT
+    { width: 30 }, // Tên thuốc
+    { width: 10 }, // Đơn vị
+    { width: 12 }, // Tồn đầu kỳ
+    { width: 12 }, // Tổng nhập
+    { width: 12 }, // Tổng xuất
+    { width: 12 }, // Tồn cuối kỳ
+    { width: 15 }, // Giá trị
+    { width: 15 }, // Trạng thái
+  ];
+
+  // Data rows
+  let totalOpeningStock = 0;
+  let totalInbound = 0;
+  let totalOutbound = 0;
+  let totalClosingStock = 0;
+  let totalValue = 0;
+
+  stockData.products.forEach((product, index) => {
+    const row = stockSheet.addRow([
+      index + 1,
+      product.productName,
+      product.unit,
+      product.openingStock,
+      product.totalInbound,
+      product.totalOutbound,
+      product.closingStock,
+      product.value,
+      product.status,
+    ]);
+
+    row.alignment = { vertical: "middle" };
+    row.getCell(8).numFmt = "#,##0";
+
+    totalOpeningStock += product.openingStock;
+    totalInbound += product.totalInbound;
+    totalOutbound += product.totalOutbound;
+    totalClosingStock += product.closingStock;
+    totalValue += product.value;
+  });
+
+  // Summary row
+  const summaryRow = stockSheet.addRow([
+    "",
+    "TỔNG CỘNG",
+    "",
+    totalOpeningStock,
+    totalInbound,
+    totalOutbound,
+    totalClosingStock,
+    totalValue,
+    "",
+  ]);
+  summaryRow.font = { bold: true };
+  summaryRow.getCell(8).numFmt = "#,##0";
+  summaryRow.fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FFFFEB9C" },
+  };
+
+  // Sheet 2: Trends
+  const trendsSheet = workbook.addWorksheet("Xu Hướng Tháng");
+
+  trendsSheet.mergeCells("A1:G1");
+  trendsSheet.getCell("A1").value = "BÁO CÁO XU HƯỚNG THEO THÁNG";
+  trendsSheet.getCell("A1").font = { size: 16, bold: true };
+  trendsSheet.getCell("A1").alignment = { horizontal: "center", vertical: "middle" };
+
+  trendsSheet.getRow(3).values = [
+    "STT",
+    "Tháng/Năm",
+    "Nhập (SL)",
+    "Nhập (VNĐ)",
+    "Xuất (SL)",
+    "Xuất (VNĐ)",
+    "Số GD",
+  ];
+  trendsSheet.getRow(3).font = { bold: true };
+  trendsSheet.getRow(3).alignment = { horizontal: "center", vertical: "middle" };
+  trendsSheet.getRow(3).fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FFD9EAD3" },
+  };
+
+  trendsSheet.columns = [
+    { width: 6 },
+    { width: 12 },
+    { width: 12 },
+    { width: 15 },
+    { width: 12 },
+    { width: 15 },
+    { width: 10 },
+  ];
+
+  trendsData.trends.forEach((trend, index) => {
+    const row = trendsSheet.addRow([
+      index + 1,
+      `${trend.month}/${trend.year}`,
+      trend.inbound.totalQuantity,
+      trend.inbound.totalValue,
+      trend.outbound.totalQuantity,
+      trend.outbound.totalValue,
+      trend.inbound.transactionCount + trend.outbound.transactionCount,
+    ]);
+    row.alignment = { vertical: "middle" };
+    row.getCell(4).numFmt = "#,##0";
+    row.getCell(6).numFmt = "#,##0";
+  });
+
+  // Sheet 3: Status Distribution
+  const statusSheet = workbook.addWorksheet("Phân Phối Trạng Thái");
+
+  statusSheet.mergeCells("A1:D1");
+  statusSheet.getCell("A1").value = "BÁO CÁO PHÂN PHỐI TRẠNG THÁI GIAO DỊCH";
+  statusSheet.getCell("A1").font = { size: 16, bold: true };
+  statusSheet.getCell("A1").alignment = { horizontal: "center", vertical: "middle" };
+
+  statusSheet.getRow(3).values = ["STT", "Trạng thái", "Số lượng", "Tỷ lệ (%)"];
+  statusSheet.getRow(3).font = { bold: true };
+  statusSheet.getRow(3).alignment = { horizontal: "center", vertical: "middle" };
+  statusSheet.getRow(3).fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FFD9EAD3" },
+  };
+
+  statusSheet.columns = [
+    { width: 6 },
+    { width: 20 },
+    { width: 12 },
+    { width: 12 },
+  ];
+
+  const statusLabels = {
+    COMPLETED: "Hoàn thành",
+    DRAFT: "Nháp",
+    CANCELED: "Đã hủy",
+  };
+
+  statusData.distribution.forEach((item, index) => {
+    const row = statusSheet.addRow([
+      index + 1,
+      statusLabels[item.status] || item.status,
+      item.count,
+      item.percentage,
+    ]);
+    row.alignment = { vertical: "middle" };
+  });
+
+  // Send file
+  const fileName = `Bao_Cao_Ton_Kho_${new Date().toISOString().split("T")[0]}.xlsx`;
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  );
+  res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+
+  await workbook.xlsx.write(res);
+  res.end();
+}
+
+/**
+ * Export to PDF format (reuse existing PDF generation functions)
+ */
+async function exportToPDF(res, stockData, trendsData, statusData, startDate, endDate) {
+  const doc = new PDFDocument({ margin: 50, size: "A4" });
+
+  const fileName = `Bao_Cao_Ton_Kho_${new Date().toISOString().split("T")[0]}.pdf`;
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+
+  doc.pipe(res);
+
+  // Register fonts and create fonts object
+  let fonts;
+  if (fs.existsSync(FONT_REGULAR) && fs.existsSync(FONT_BOLD)) {
+    doc.registerFont("Roboto-Regular", FONT_REGULAR);
+    doc.registerFont("Roboto-Bold", FONT_BOLD);
+    fonts = { regular: "Roboto-Regular", bold: "Roboto-Bold" };
+    doc.font("Roboto-Bold");
+  } else {
+    console.warn("Font files not found, using default fonts");
+    fonts = { regular: "Helvetica", bold: "Helvetica-Bold" };
+    doc.font("Helvetica-Bold");
+  }
+
+  // Title
+  doc.fontSize(18).text("BÁO CÁO TỒN KHO", {
+    align: "center",
+  });
+  doc.moveDown(0.5);
+
+  // Date range
+  const dateRangeText = `Từ ngày: ${startDate || "N/A"} - Đến ngày: ${endDate || "N/A"}`;
+  doc.font(fonts.regular).fontSize(11).text(dateRangeText, {
+    align: "center",
+  });
+  doc.moveDown(1);
+
+  // Stock Summary Table
+  generateStockSummaryTable(doc, stockData, fonts);
+  doc.addPage();
+
+  // Trends Table
+  generateTrendsTable(doc, trendsData, fonts);
+  doc.addPage();
+
+  // Status Distribution Table
+  generateStatusDistributionTable(doc, statusData, fonts);
+
+  doc.end();
+}
+
+export { exportReportFile };

@@ -20,6 +20,11 @@ class TransactionController {
    */
   static async create(req, res) {
     try {
+      // Kiểm tra body hợp lệ
+      if (!req.body || typeof req.body !== "object") {
+        return ApiResponse.error(res, "Missing or invalid request body", 400);
+      }
+
       // Validate
       const { error, value } = createInboundTransactionSchema.validate(
         req.body,
@@ -32,6 +37,15 @@ class TransactionController {
         return ApiResponse.error(res, "Validation failed", 400, {
           details: error.details.map((d) => d.message),
         });
+      }
+
+      // Kiểm tra trường type
+      if (!value.type) {
+        return ApiResponse.error(
+          res,
+          "Missing 'type' field in request body",
+          400
+        );
       }
 
       // actor lấy từ auth middleware (req.user)
@@ -99,7 +113,8 @@ class TransactionController {
    */
   static async getList(req, res) {
     try {
-      const { type, search, fromDate, toDate, page, limit } = req.query;
+      const { type, search, fromDate, toDate, page, limit, lotNumber } =
+        req.query;
 
       if (!type || (type !== "INBOUND" && type !== "OUTBOUND")) {
         return ApiResponse.error(
@@ -115,6 +130,7 @@ class TransactionController {
         toDate,
         page: page ? parseInt(page, 10) : 1,
         limit: limit ? parseInt(limit, 10) : 10,
+        lotNumber: lotNumber || undefined,
       };
 
       let result;

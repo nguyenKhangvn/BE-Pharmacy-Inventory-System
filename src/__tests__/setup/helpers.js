@@ -72,3 +72,52 @@ export const createProductData = (overrides = {}) => {
     ...overrides,
   };
 };
+
+/**
+ * Create sample warehouse data
+ * @param {Object} overrides - Override default values
+ * @returns {Object} Warehouse data
+ */
+export const createWarehouseData = (overrides = {}) => {
+  return {
+    code: "WH001",
+    name: "Test Warehouse",
+    address: "Test Location",
+    isActive: true,
+    ...overrides,
+  };
+};
+
+/**
+ * Create sample inventory lot data
+ * @param {Object} overrides - Override default values
+ * @returns {Object} InventoryLot data
+ */
+export const createInventoryLotData = (overrides = {}) => {
+  return {
+    lotNumber: "LOT001",
+    quantity: 100,
+    unitCost: 1000,
+    expiryDate: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000), // 60 days from now
+    ...overrides,
+  };
+};
+
+/**
+ * Create sample alert data
+ * @param {Object} overrides - Override default values
+ * @returns {Object} Alert data
+ */
+export const createAlertData = (overrides = {}) => {
+  return {
+    alertType: "LOW_STOCK",
+    severity: "MEDIUM",
+    productSku: "SKU001",
+    productName: "Test Product",
+    currentStock: 5,
+    minimumStock: 10,
+    message: "Test alert message",
+    status: "ACTIVE",
+    ...overrides,
+  };
+};
