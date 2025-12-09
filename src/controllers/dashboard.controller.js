@@ -1,114 +1,102 @@
 import Product from "../models/product.model.js";
 import InventoryLot from "../models/inventoryLot.model.js";
 import Transaction from "../models/transaction.model.js";
-import { Alert } from "../models/index.js";
+import { Alert } from "../models/index.js"; // Đảm bảo import Alert
 import ApiResponse from "../utils/ApiResponse.js";
 
-/**
- * @route GET /api/dashboard
- * @desc Lấy dữ liệu tổng quan cho Dashboard
- * @returns {Object} KPIs, biểu đồ 7 ngày, và 5 cảnh báo mới nhất
- */
 export const getDashboard = async (req, res) => {
   try {
-    // 1. KPI: Tổng số loại thuốc (số sản phẩm active)
     const totalProducts = await Product.countDocuments({ isActive: true });
 
-    // 2. KPI: Tổng giá trị tồn kho (từ tất cả các lot)
     const stockValueResult = await InventoryLot.aggregate([
-      {
-        $match: {
-          quantity: { $gt: 0 },
-        },
-      },
+      { $match: { quantity: { $gt: 0 } } },
       {
         $group: {
           _id: null,
-          totalValue: {
-            $sum: { $multiply: ["$quantity", "$unitCost"] },
-          },
+          totalValue: { $sum: { $multiply: ["$quantity", "$unitCost"] } },
         },
       },
     ]);
     const totalStockValue = stockValueResult[0]?.totalValue || 0;
 
-    // 3. KPI: Thuốc sắp hết hạn (trong vòng 30 ngày)
-    const expiringLots = await InventoryLot.expiringSoon(30);
-    const expiringCount = expiringLots.length;
+    const expiringCount = await Alert.countDocuments({
+      status: "ACTIVE",
+      alertType: { $in: ["EXPIRING_SOON", "EXPIRED"] },
+    });
 
-    // 4. KPI: Thuốc dưới tồn tối thiểu
-    const lowStockProducts = await Product.aggregate([
-      {
-        $match: {
-          isActive: true,
-          $expr: { $lt: ["$currentStock", "$minimumStock"] },
-        },
-      },
-      {
-        $count: "count",
-      },
-    ]);
-    const lowStockCount = lowStockProducts[0]?.count || 0;
+    const lowStockCount = await Alert.countDocuments({
+      status: "ACTIVE",
+      alertType: { $in: ["LOW_STOCK", "OUT_OF_STOCK"] },
+    });
 
-    // 5. Biểu đồ cột: Nhập/Xuất 7 ngày gần nhất
     const today = new Date();
     today.setHours(23, 59, 59, 999);
     const sevenDaysAgo = new Date(today);
-    sevenDaysAgo.setDate(today.getDate() - 6);
+    sevenDaysAgo.setDate(today.getDate() - 7);
     sevenDaysAgo.setHours(0, 0, 0, 0);
+
+    const chartData = [];
+    const daysOfWeek = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
+    const now = new Date();
+
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(now.getDate() - i);
+      const dateStr = d.toISOString().split("T")[0];
+      const dayOfWeek = daysOfWeek[d.getDay()];
+      chartData.push({
+        date: dateStr,
+        day: dayOfWeek,
+        inbound: 0,
+        outbound: 0,
+      });
+    }
 
     const transactionsLast7Days = await Transaction.aggregate([
       {
         $match: {
-          transactionDate: {
-            $gte: sevenDaysAgo,
-            $lte: today,
-          },
+          transactionDate: { $gte: sevenDaysAgo, $lte: today },
+          status: "COMPLETED",
         },
+      },
+      {
+        $lookup: {
+          from: "transactiondetails",
+          localField: "_id",
+          foreignField: "transactionId",
+          as: "details",
+        },
+      },
+      {
+        $addFields: { calculatedTotalQty: { $sum: "$details.quantity" } },
       },
       {
         $group: {
           _id: {
             date: {
-              $dateToString: { format: "%Y-%m-%d", date: "$transactionDate" },
+              $dateToString: {
+                format: "%Y-%m-%d",
+                date: "$transactionDate",
+                timezone: "+07:00",
+              },
             },
             type: "$type",
           },
-          totalQuantity: { $sum: "$totalQuantity" },
+          totalQuantity: { $sum: "$calculatedTotalQty" },
         },
-      },
-      {
-        $sort: { "_id.date": 1 },
       },
     ]);
 
-    // Tạo mảng 7 ngày với dữ liệu mặc định
-    const chartData = [];
-    const daysOfWeek = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
-    
-    for (let i = 0; i < 7; i++) {
-      const date = new Date(sevenDaysAgo);
-      date.setDate(sevenDaysAgo.getDate() + i);
-      const dateStr = date.toISOString().split("T")[0];
-      const dayOfWeek = daysOfWeek[date.getDay()];
+    transactionsLast7Days.forEach((item) => {
+      const { date, type } = item._id;
+      const dataPoint = chartData.find((d) => d.date === date);
+      if (dataPoint) {
+        if (type === "INBOUND") dataPoint.inbound = item.totalQuantity;
+        else if (type === "OUTBOUND") dataPoint.outbound = item.totalQuantity;
+      }
+    });
 
-      const inbound = transactionsLast7Days.find(
-        (t) => t._id.date === dateStr && t._id.type === "INBOUND"
-      )?.totalQuantity || 0;
-
-      const outbound = transactionsLast7Days.find(
-        (t) => t._id.date === dateStr && t._id.type === "OUTBOUND"
-      )?.totalQuantity || 0;
-
-      chartData.push({
-        date: dateStr,
-        day: dayOfWeek,
-        inbound,
-        outbound,
-      });
-    }
-
-    // 6. Lấy 5 cảnh báo mới nhất (ACTIVE)
+    // 6. Lấy 5 cảnh báo mới nhất (Giữ nguyên)
     const recentAlerts = await Alert.find({ status: "ACTIVE" })
       .sort({ createdAt: -1 })
       .limit(5)
@@ -116,7 +104,6 @@ export const getDashboard = async (req, res) => {
       .populate("warehouseId", "name")
       .lean();
 
-    // Format alerts
     const formattedAlerts = recentAlerts.map((alert) => ({
       id: alert._id,
       type: alert.alertType,
@@ -139,23 +126,22 @@ export const getDashboard = async (req, res) => {
       createdAt: alert.createdAt,
     }));
 
-    // Response
-    return ApiResponse.success(res, {
-      kpis: {
-        totalProducts,
-        totalStockValue,
-        expiringCount,
-        lowStockCount,
+    return ApiResponse.success(
+      res,
+      {
+        kpis: {
+          totalProducts,
+          totalStockValue,
+          expiringCount, // Giờ sẽ hiển thị số 5 đúng với thực tế
+          lowStockCount,
+        },
+        chart: chartData,
+        alerts: formattedAlerts,
       },
-      chart: chartData,
-      alerts: formattedAlerts,
-    }, "Lấy dữ liệu dashboard thành công");
+      "Lấy dữ liệu dashboard thành công"
+    );
   } catch (error) {
     console.error("Get dashboard error:", error);
-    return ApiResponse.error(
-      res,
-      "Lỗi server khi lấy dữ liệu dashboard. Vui lòng thử lại sau.",
-      500
-    );
+    return ApiResponse.error(res, "Lỗi server khi lấy dữ liệu dashboard.", 500);
   }
 };
