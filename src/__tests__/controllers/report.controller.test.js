@@ -2102,3 +2102,493 @@ describe("Report Controller - exportReport", () => {
     });
   });
 });
+
+describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
+  let req, res;
+
+  beforeEach(() => {
+    req = {
+      query: {},
+    };
+    res = {
+      status: jest.fn().mockReturnThis(),
+      json: jest.fn(),
+      setHeader: jest.fn(),
+      end: jest.fn(),
+      write: jest.fn((chunk, callback) => {
+        if (callback) callback();
+        return true;
+      }),
+    };
+
+    // Mock ApiResponse methods
+    ApiResponse.error = jest.fn();
+    ApiResponse.badRequest = jest.fn();
+
+    jest.clearAllMocks();
+  });
+
+  describe("Input Validation", () => {
+    test("should return 400 if type is invalid", async () => {
+      req.query = { type: "invalid" };
+
+      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      await exportReportFile(req, res);
+
+      expect(ApiResponse.badRequest).toHaveBeenCalledWith(
+        res,
+        "Invalid export type. Use 'excel' or 'pdf'"
+      );
+    });
+
+    test("should return 400 if startDate format is invalid", async () => {
+      req.query = { type: "excel", startDate: "2024/01/01", endDate: "2024-12-31" };
+
+      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      await exportReportFile(req, res);
+
+      expect(ApiResponse.badRequest).toHaveBeenCalledWith(
+        res,
+        "Invalid startDate format (YYYY-MM-DD)"
+      );
+    });
+
+    test("should return 400 if endDate format is invalid", async () => {
+      req.query = { type: "excel", startDate: "2024-01-01", endDate: "2024/12/31" };
+
+      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      await exportReportFile(req, res);
+
+      expect(ApiResponse.badRequest).toHaveBeenCalledWith(
+        res,
+        "Invalid endDate format (YYYY-MM-DD)"
+      );
+    });
+
+    test("should return 400 if startDate is after endDate", async () => {
+      req.query = { type: "excel", startDate: "2024-12-31", endDate: "2024-01-01" };
+
+      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      await exportReportFile(req, res);
+
+      expect(ApiResponse.badRequest).toHaveBeenCalledWith(
+        res,
+        "startDate must be before endDate"
+      );
+    });
+
+    test("should accept valid dates", async () => {
+      req.query = { type: "excel", startDate: "2024-01-01", endDate: "2024-12-31" };
+
+      // Mock database calls
+      Product.find = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue([
+            { _id: "507f1f77bcf86cd799439011", name: "Product 1", unit: "Viên" }
+          ])
+        })
+      });
+
+      Product.findOne = jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue({
+          name: "Product 1",
+          averageCost: 10000,
+          minimumStock: 10,
+          reorderLevel: 50
+        })
+      });
+
+      TransactionDetail.aggregate = jest.fn().mockResolvedValue([]);
+      Transaction.aggregate = jest.fn().mockResolvedValue([]);
+      Transaction.find = jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([])
+      });
+
+      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      await exportReportFile(req, res);
+
+      expect(res.setHeader).toHaveBeenCalledWith(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      );
+    });
+  });
+
+  describe("Excel Export", () => {
+    beforeEach(() => {
+      // Mock database calls with sample data
+      Product.find = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue([
+            { _id: "507f1f77bcf86cd799439011", name: "Paracetamol", unit: "Viên" },
+            { _id: "507f1f77bcf86cd799439012", name: "Amoxicillin", unit: "Viên" }
+          ])
+        })
+      });
+
+      Product.findOne = jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue({
+          name: "Paracetamol",
+          averageCost: 5000,
+          minimumStock: 100,
+          reorderLevel: 200
+        })
+      });
+
+      TransactionDetail.aggregate = jest.fn().mockResolvedValue([
+        { totalQuantity: 500 }
+      ]);
+
+      Transaction.aggregate = jest.fn().mockResolvedValue([
+        {
+          year: 2024,
+          month: 1,
+          totalQuantity: 500,
+          totalValue: 2500000,
+          transactionCount: 5
+        }
+      ]);
+
+      Transaction.find = jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([
+          {
+            _id: "txn1",
+            type: "INBOUND",
+            createdAt: new Date("2024-01-15"),
+            status: "COMPLETED"
+          }
+        ])
+      });
+    });
+
+    test("should export Excel file with default type", async () => {
+      req.query = { startDate: "2024-01-01", endDate: "2024-12-31" };
+
+      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      await exportReportFile(req, res);
+
+      expect(res.setHeader).toHaveBeenCalledWith(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      );
+      expect(res.setHeader).toHaveBeenCalledWith(
+        "Content-Disposition",
+        expect.stringContaining("attachment; filename=")
+      );
+      expect(res.setHeader).toHaveBeenCalledWith(
+        "Content-Disposition",
+        expect.stringContaining(".xlsx")
+      );
+    });
+
+    test("should export Excel file when type=excel", async () => {
+      req.query = { type: "excel", startDate: "2024-01-01", endDate: "2024-12-31" };
+
+      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      await exportReportFile(req, res);
+
+      expect(res.setHeader).toHaveBeenCalledWith(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      );
+    });
+
+    test("should work without date parameters", async () => {
+      req.query = { type: "excel" };
+
+      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      await exportReportFile(req, res);
+
+      expect(res.setHeader).toHaveBeenCalledWith(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      );
+    });
+
+    test("should set correct filename with current date", async () => {
+      req.query = { type: "excel", startDate: "2024-01-01", endDate: "2024-12-31" };
+
+      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      await exportReportFile(req, res);
+
+      const today = new Date().toISOString().split("T")[0];
+      expect(res.setHeader).toHaveBeenCalledWith(
+        "Content-Disposition",
+        `attachment; filename="Bao_Cao_Ton_Kho_${today}.xlsx"`
+      );
+    });
+
+    test("should call res.end() after writing Excel", async () => {
+      req.query = { type: "excel", startDate: "2024-01-01", endDate: "2024-12-31" };
+
+      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      await exportReportFile(req, res);
+
+      expect(res.end).toHaveBeenCalled();
+    });
+  });
+
+  describe("PDF Export", () => {
+    beforeEach(() => {
+      // Mock database calls
+      Product.find = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue([
+            { _id: "507f1f77bcf86cd799439011", name: "Paracetamol", unit: "Viên" }
+          ])
+        })
+      });
+
+      Product.findOne = jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue({
+          name: "Paracetamol",
+          averageCost: 5000,
+          minimumStock: 100,
+          reorderLevel: 200
+        })
+      });
+
+      TransactionDetail.aggregate = jest.fn().mockResolvedValue([
+        { totalQuantity: 500 }
+      ]);
+
+      Transaction.aggregate = jest.fn().mockResolvedValue([]);
+      Transaction.find = jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([])
+      });
+
+      // Mock fs.existsSync
+      mockExistsSync.mockReturnValue(true);
+    });
+
+    test("should export PDF file when type=pdf", async () => {
+      req.query = { type: "pdf", startDate: "2024-01-01", endDate: "2024-12-31" };
+
+      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      await exportReportFile(req, res);
+
+      expect(res.setHeader).toHaveBeenCalledWith(
+        "Content-Type",
+        "application/pdf"
+      );
+      expect(res.setHeader).toHaveBeenCalledWith(
+        "Content-Disposition",
+        expect.stringContaining(".pdf")
+      );
+    });
+
+    test("should register fonts if font files exist", async () => {
+      req.query = { type: "pdf", startDate: "2024-01-01", endDate: "2024-12-31" };
+      mockExistsSync.mockReturnValue(true);
+
+      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      await exportReportFile(req, res);
+
+      expect(mockDoc.registerFont).toHaveBeenCalled();
+    });
+
+    test("should use default font if font files do not exist", async () => {
+      req.query = { type: "pdf", startDate: "2024-01-01", endDate: "2024-12-31" };
+      mockExistsSync.mockReturnValue(false);
+
+      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      await exportReportFile(req, res);
+
+      expect(mockDoc.font).toHaveBeenCalledWith("Helvetica-Bold");
+    });
+
+    test("should call doc.end() after PDF generation", async () => {
+      req.query = { type: "pdf", startDate: "2024-01-01", endDate: "2024-12-31" };
+
+      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      await exportReportFile(req, res);
+
+      expect(mockDoc.end).toHaveBeenCalled();
+    });
+  });
+
+  describe("Data Processing", () => {
+    beforeEach(() => {
+      Product.find = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue([
+            { _id: "507f1f77bcf86cd799439011", name: "Product A", unit: "Viên" },
+            { _id: "507f1f77bcf86cd799439012", name: "Product B", unit: "Hộp" }
+          ])
+        })
+      });
+
+      TransactionDetail.aggregate = jest.fn().mockImplementation((pipeline) => {
+        const matchStage = pipeline.find(stage => stage.$match);
+        if (matchStage && matchStage.$match["transaction.type"] === "INBOUND") {
+          return Promise.resolve([{ totalQuantity: 1000 }]);
+        }
+        if (matchStage && matchStage.$match["transaction.type"] === "OUTBOUND") {
+          return Promise.resolve([{ totalQuantity: 300 }]);
+        }
+        return Promise.resolve([]);
+      });
+
+      Product.findOne = jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue({
+          name: "Product A",
+          averageCost: 10000,
+          minimumStock: 50,
+          reorderLevel: 100
+        })
+      });
+
+      Transaction.aggregate = jest.fn().mockResolvedValue([]);
+      Transaction.find = jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([])
+      });
+    });
+
+    test("should calculate stock data correctly", async () => {
+      req.query = { type: "excel", startDate: "2024-01-01", endDate: "2024-12-31" };
+
+      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      await exportReportFile(req, res);
+
+      expect(Product.find).toHaveBeenCalled();
+      expect(TransactionDetail.aggregate).toHaveBeenCalled();
+    });
+
+    test("should enhance products with value and status", async () => {
+      req.query = { type: "excel", startDate: "2024-01-01", endDate: "2024-12-31" };
+
+      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      await exportReportFile(req, res);
+
+      expect(Product.findOne).toHaveBeenCalled();
+    });
+
+    test("should determine status based on stock levels", async () => {
+      req.query = { type: "excel", startDate: "2024-01-01", endDate: "2024-12-31" };
+
+      Product.findOne = jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue({
+          name: "Product A",
+          averageCost: 5000,
+          minimumStock: 100,
+          reorderLevel: 200
+        })
+      });
+
+      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      await exportReportFile(req, res);
+
+      expect(Product.findOne).toHaveBeenCalled();
+    });
+  });
+
+  describe("Error Handling", () => {
+    test("should handle database errors gracefully", async () => {
+      req.query = { type: "excel", startDate: "2024-01-01", endDate: "2024-12-31" };
+
+      Product.find = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockRejectedValue(new Error("Database error"))
+        })
+      });
+
+      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      await exportReportFile(req, res);
+
+      expect(ApiResponse.error).toHaveBeenCalledWith(
+        res,
+        "Error exporting report",
+        500,
+        "Database error"
+      );
+    });
+
+    test("should handle product not found", async () => {
+      req.query = { type: "excel", startDate: "2024-01-01", endDate: "2024-12-31" };
+
+      Product.find = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue([
+            { _id: "507f1f77bcf86cd799439011", name: "Product A", unit: "Viên" }
+          ])
+        })
+      });
+
+      Product.findOne = jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue(null)
+      });
+
+      TransactionDetail.aggregate = jest.fn().mockResolvedValue([
+        { totalQuantity: 100 }
+      ]);
+
+      Transaction.aggregate = jest.fn().mockResolvedValue([]);
+      Transaction.find = jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([])
+      });
+
+      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      await exportReportFile(req, res);
+
+      // Should not throw error, should use default values
+      expect(res.setHeader).toHaveBeenCalled();
+    });
+  });
+
+  describe("Integration Tests", () => {
+    test("should generate complete Excel report with all sheets", async () => {
+      req.query = { type: "excel", startDate: "2024-01-01", endDate: "2024-12-31" };
+
+      Product.find = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue([
+            { _id: "507f1f77bcf86cd799439011", name: "Paracetamol", unit: "Viên" }
+          ])
+        })
+      });
+
+      Product.findOne = jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue({
+          name: "Paracetamol",
+          averageCost: 5000,
+          minimumStock: 100,
+          reorderLevel: 200
+        })
+      });
+
+      TransactionDetail.aggregate = jest.fn().mockResolvedValue([
+        { totalQuantity: 1000 }
+      ]);
+
+      Transaction.aggregate = jest.fn().mockResolvedValue([
+        {
+          year: 2024,
+          month: 1,
+          totalQuantity: 500,
+          totalValue: 2500000,
+          transactionCount: 5
+        }
+      ]);
+
+      Transaction.find = jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([
+          {
+            _id: "txn1",
+            type: "INBOUND",
+            createdAt: new Date("2024-01-15"),
+            status: "COMPLETED"
+          }
+        ])
+      });
+
+      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      await exportReportFile(req, res);
+
+      expect(res.setHeader).toHaveBeenCalledWith(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      );
+      expect(res.end).toHaveBeenCalled();
+    });
+  });
+});

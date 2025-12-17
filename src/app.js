@@ -3,6 +3,7 @@ import cors from "cors";
 import mongoose from "mongoose";
 import dotenv from "dotenv";
 import routes from "./routes/index.js";
+import cronJobs from "./jobs/cronJobs.js";
 
 dotenv.config();
 
@@ -18,6 +19,9 @@ const connectDB = async () => {
   try {
     await mongoose.connect(process.env.MONGODB_URI);
     console.log("MongoDB connected successfully");
+
+    // Khởi tạo cron jobs sau khi kết nối DB thành công
+    cronJobs.initialize();
   } catch (error) {
     console.error("MongoDB connection error:", error);
     process.exit(1);
