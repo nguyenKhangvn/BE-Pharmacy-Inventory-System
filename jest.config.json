@@ -4,5 +4,9 @@
   "collectCoverageFrom": ["src/**/*.js", "!src/server.js", "!src/**/*.test.js"],
   "coverageDirectory": "coverage",
   "coverageReporters": ["text", "lcov", "html"],
-  "transform": {}
+  "transform": {},
+  "transformIgnorePatterns": ["node_modules/(?!(exceljs)/)"],
+  "moduleNameMapper": {
+    "^exceljs$": "<rootDir>/src/__tests__/__mocks__/exceljs.js"
+  }
 }
