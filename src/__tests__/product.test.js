@@ -369,4 +369,312 @@ describe("Product API Tests", () => {
       await request(app).get(`/api/products/${product._id}`).expect(401);
     });
   });
+
+  describe("GET /api/products - Additional Edge Cases", () => {
+    it("should return empty array when no products exist", async () => {
+      const res = await request(app)
+        .get("/api/products")
+        .set("Authorization", `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toEqual([]);
+      expect(res.body.pagination.total).toBe(0);
+    });
+
+    it("should handle search with special characters", async () => {
+      const cat = await Category.create(createCategoryData());
+
+      await Product.create([
+        createProductData({
+          sku: "TEST-001",
+          name: "Product (Special)",
+          categoryId: cat._id,
+        }),
+        createProductData({
+          sku: "TEST-002",
+          name: "Product & Co.",
+          categoryId: cat._id,
+        }),
+      ]);
+
+      const res = await request(app)
+        .get("/api/products")
+        .query({ search: "(Special)" })
+        .set("Authorization", `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("should handle multiple filters combined", async () => {
+      const cat1 = await Category.create(
+        createCategoryData({ code: "CAT001", name: "Category 1" })
+      );
+      const cat2 = await Category.create(
+        createCategoryData({ code: "CAT002", name: "Category 2" })
+      );
+
+      await Product.create([
+        createProductData({
+          sku: "ACTIVE-001",
+          name: "Active Product",
+          isActive: true,
+          categoryId: cat1._id,
+        }),
+        createProductData({
+          sku: "INACTIVE-001",
+          name: "Inactive Product",
+          isActive: false,
+          categoryId: cat1._id,
+        }),
+        createProductData({
+          sku: "ACTIVE-002",
+          name: "Other Active",
+          isActive: true,
+          categoryId: cat2._id,
+        }),
+      ]);
+
+      const res = await request(app)
+        .get("/api/products")
+        .query({
+          isActive: true,
+          categoryId: cat1._id.toString(),
+          search: "Active",
+        })
+        .set("Authorization", `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.length).toBe(1);
+      expect(res.body.data[0].sku).toBe("ACTIVE-001");
+    });
+
+    it("should handle limit = 1", async () => {
+      const cat = await Category.create(createCategoryData());
+
+      await Product.create([
+        createProductData({ sku: "SKU001", name: "P1", categoryId: cat._id }),
+        createProductData({ sku: "SKU002", name: "P2", categoryId: cat._id }),
+      ]);
+
+      const res = await request(app)
+        .get("/api/products")
+        .query({ limit: 1 })
+        .set("Authorization", `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.length).toBe(1);
+      expect(res.body.pagination.limit).toBe(1);
+    });
+
+    it("should handle large limit value", async () => {
+      const cat = await Category.create(
+        createCategoryData({ name: "Large Limit Cat" })
+      );
+
+      await Product.create([
+        createProductData({ sku: "SKU001", name: "P1", categoryId: cat._id }),
+        createProductData({ sku: "SKU002", name: "P2", categoryId: cat._id }),
+      ]);
+
+      const res = await request(app)
+        .get("/api/products")
+        .query({ limit: 100 })
+        .set("Authorization", `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.length).toBe(2);
+    });
+
+    it("should work with user role (not just admin)", async () => {
+      const cat = await Category.create(
+        createCategoryData({ name: "User Role Cat" })
+      );
+
+      await Product.create(
+        createProductData({
+          sku: "USER-001",
+          name: "User Product",
+          categoryId: cat._id,
+        })
+      );
+
+      const res = await request(app)
+        .get("/api/products")
+        .set("Authorization", `Bearer ${userToken}`)
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.length).toBe(1);
+    });
+
+    it("should return suppliersCount = 0 when product has no suppliers", async () => {
+      const cat = await Category.create(
+        createCategoryData({ name: "No Supplier Cat" })
+      );
+      const product = await Product.create(
+        createProductData({
+          sku: "NO-SUPPLIER",
+          name: "No Supplier Product",
+          categoryId: cat._id,
+        })
+      );
+
+      const res = await request(app)
+        .get(`/api/products/${product._id}`)
+        .set("Authorization", `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.suppliersCount).toBe(0);
+    });
+
+    it("should handle categoryId filter with no matching products", async () => {
+      const cat1 = await Category.create(
+        createCategoryData({ code: "CAT001", name: "Category 1" })
+      );
+      const cat2 = await Category.create(
+        createCategoryData({ code: "CAT002", name: "Category 2" })
+      );
+
+      await Product.create(
+        createProductData({ sku: "SKU001", name: "P1", categoryId: cat1._id })
+      );
+
+      const res = await request(app)
+        .get("/api/products")
+        .query({ categoryId: cat2._id.toString() })
+        .set("Authorization", `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.length).toBe(0);
+    });
+
+    it("should handle invalid boolean for isActive", async () => {
+      const res = await request(app)
+        .get("/api/products")
+        .query({ isActive: "invalid" })
+        .set("Authorization", `Bearer ${authToken}`)
+        .expect(400);
+
+      expect(res.body.success).toBe(false);
+    });
+
+    it("should handle negative page number", async () => {
+      const res = await request(app)
+        .get("/api/products")
+        .query({ page: -1 })
+        .set("Authorization", `Bearer ${authToken}`)
+        .expect(400);
+
+      expect(res.body.success).toBe(false);
+    });
+
+    it("should handle invalid categoryId format", async () => {
+      const res = await request(app)
+        .get("/api/products")
+        .query({ categoryId: "not-valid-id" })
+        .set("Authorization", `Bearer ${authToken}`)
+        .expect(400);
+
+      expect(res.body.success).toBe(false);
+    });
+
+    it("should handle search with empty string", async () => {
+      const cat = await Category.create(createCategoryData());
+
+      await Product.create([
+        createProductData({ sku: "SKU001", name: "P1", categoryId: cat._id }),
+        createProductData({ sku: "SKU002", name: "P2", categoryId: cat._id }),
+      ]);
+
+      const res = await request(app)
+        .get("/api/products")
+        .query({ search: "" })
+        .set("Authorization", `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.length).toBe(2);
+    });
+
+    it("should handle pagination=false with many products", async () => {
+      const cat = await Category.create(createCategoryData());
+
+      // Create 25 products
+      const products = [];
+      for (let i = 1; i <= 25; i++) {
+        products.push(
+          createProductData({
+            sku: `SKU${String(i).padStart(3, "0")}`,
+            name: `Product ${i}`,
+            categoryId: cat._id,
+          })
+        );
+      }
+      await Product.create(products);
+
+      const res = await request(app)
+        .get("/api/products")
+        .query({ pagination: false })
+        .set("Authorization", `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.length).toBe(25);
+      expect(res.body.pagination).toBeUndefined();
+    });
+
+    it("should populate category with correct fields", async () => {
+      const cat = await Category.create(
+        createCategoryData({
+          code: "DETAILED",
+          name: "Detailed Category",
+          description: "Test Description",
+        })
+      );
+
+      const product = await Product.create(
+        createProductData({
+          sku: "DETAIL-001",
+          name: "Detail Product",
+          categoryId: cat._id,
+        })
+      );
+
+      const res = await request(app)
+        .get(`/api/products/${product._id}`)
+        .set("Authorization", `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.category).toBeDefined();
+      expect(res.body.data.category._id).toBe(cat._id.toString());
+      expect(res.body.data.category.name).toBe("Detailed Category");
+    });
+
+    it("should handle supplierId filter with no matches", async () => {
+      const cat = await Category.create(createCategoryData());
+      const fakeSupplier = new mongoose.Types.ObjectId();
+
+      await Product.create(
+        createProductData({ sku: "SKU001", name: "P1", categoryId: cat._id })
+      );
+
+      const res = await request(app)
+        .get("/api/products")
+        .query({ supplierId: fakeSupplier.toString() })
+        .set("Authorization", `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.length).toBe(0);
+    });
+  });
 });
