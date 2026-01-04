@@ -53,7 +53,8 @@ jest.unstable_mockModule("pdfkit", () => ({
 }));
 
 // 6. Import the controller and PDFDocument AFTER mocking
-const { exportReport, getStockSummary, getTrends, getStatusDistribution } = await import("../../controllers/report.controller.js");
+const { exportReport, getStockSummary, getTrends, getStatusDistribution } =
+  await import("../../controllers/report.controller.js");
 const PDFDocument = (await import("pdfkit")).default;
 
 // Mock Models (Standard Jest Mocking)
@@ -389,8 +390,16 @@ describe("Report Controller - getStockSummary", () => {
 
     test("should handle multiple products with different stock levels", async () => {
       const mockProducts = [
-        { _id: new mongoose.Types.ObjectId(), name: "Paracetamol", unit: "viên" },
-        { _id: new mongoose.Types.ObjectId(), name: "Amoxicillin", unit: "viên" },
+        {
+          _id: new mongoose.Types.ObjectId(),
+          name: "Paracetamol",
+          unit: "viên",
+        },
+        {
+          _id: new mongoose.Types.ObjectId(),
+          name: "Amoxicillin",
+          unit: "viên",
+        },
       ];
 
       Product.find = jest.fn().mockReturnValue({
@@ -400,44 +409,48 @@ describe("Report Controller - getStockSummary", () => {
       });
 
       // WE USE MOCK IMPLEMENTATION TO RETURN DATA BASED ON INPUT
-      TransactionDetail.aggregate = jest.fn().mockImplementation(async (pipeline) => {
-        // 1. Extract the criteria from the pipeline
-        const matchStage = pipeline.find((stage) => stage.$match);
-        const criteria = matchStage.$match;
+      TransactionDetail.aggregate = jest
+        .fn()
+        .mockImplementation(async (pipeline) => {
+          // 1. Extract the criteria from the pipeline
+          const matchStage = pipeline.find((stage) => stage.$match);
+          const criteria = matchStage.$match;
 
-        // Convert ObjectId to string for comparison
-        const currentProductId = criteria.productId.toString();
-        const type = criteria["transaction.type"];
-        const dateQuery = criteria["transaction.transactionDate"];
+          // Convert ObjectId to string for comparison
+          const currentProductId = criteria.productId.toString();
+          const type = criteria["transaction.type"];
+          const dateQuery = criteria["transaction.transactionDate"];
 
-        // Check if this is a "Period" query (has $gte) or "Opening" query (only $lte)
-        const isPeriodQuery = dateQuery && dateQuery.$gte !== undefined;
+          // Check if this is a "Period" query (has $gte) or "Opening" query (only $lte)
+          const isPeriodQuery = dateQuery && dateQuery.$gte !== undefined;
 
-        // --- LOGIC FOR PRODUCT 1 (Paracetamol) ---
-        if (currentProductId === mockProducts[0]._id.toString()) {
-          if (type === "INBOUND") {
-            // Period Inbound: 50, Opening Inbound: 100
-            return isPeriodQuery ? [{ totalQuantity: 50 }] : [{ totalQuantity: 100 }];
+          // --- LOGIC FOR PRODUCT 1 (Paracetamol) ---
+          if (currentProductId === mockProducts[0]._id.toString()) {
+            if (type === "INBOUND") {
+              // Period Inbound: 50, Opening Inbound: 100
+              return isPeriodQuery
+                ? [{ totalQuantity: 50 }]
+                : [{ totalQuantity: 100 }];
+            }
+            if (type === "OUTBOUND") {
+              // Period Outbound: 30, Opening Outbound: 0 (empty)
+              return isPeriodQuery ? [{ totalQuantity: 30 }] : [];
+            }
           }
-          if (type === "OUTBOUND") {
-            // Period Outbound: 30, Opening Outbound: 0 (empty)
-            return isPeriodQuery ? [{ totalQuantity: 30 }] : [];
-          }
-        }
 
-        // --- LOGIC FOR PRODUCT 2 (Amoxicillin) ---
-        if (currentProductId === mockProducts[1]._id.toString()) {
-          if (type === "INBOUND") {
-            // Period Inbound: 200, Opening Inbound: 0
-            return isPeriodQuery ? [{ totalQuantity: 200 }] : [];
+          // --- LOGIC FOR PRODUCT 2 (Amoxicillin) ---
+          if (currentProductId === mockProducts[1]._id.toString()) {
+            if (type === "INBOUND") {
+              // Period Inbound: 200, Opening Inbound: 0
+              return isPeriodQuery ? [{ totalQuantity: 200 }] : [];
+            }
+            if (type === "OUTBOUND") {
+              return []; // No outbound at all
+            }
           }
-          if (type === "OUTBOUND") {
-            return []; // No outbound at all
-          }
-        }
 
-        return []; // Default fallback
-      });
+          return []; // Default fallback
+        });
 
       await getStockSummary(req, res);
 
@@ -471,8 +484,16 @@ describe("Report Controller - getStockSummary", () => {
 
     test("should filter out products with no stock activity", async () => {
       const mockProducts = [
-        { _id: new mongoose.Types.ObjectId(), name: "Active Product", unit: "viên" },
-        { _id: new mongoose.Types.ObjectId(), name: "Inactive Product", unit: "viên" },
+        {
+          _id: new mongoose.Types.ObjectId(),
+          name: "Active Product",
+          unit: "viên",
+        },
+        {
+          _id: new mongoose.Types.ObjectId(),
+          name: "Inactive Product",
+          unit: "viên",
+        },
       ];
 
       Product.find = jest.fn().mockReturnValue({
@@ -591,7 +612,11 @@ describe("Report Controller - getStockSummary", () => {
     });
 
     test("should handle aggregate query failure", async () => {
-      const mockProduct = { _id: new mongoose.Types.ObjectId(), name: "Test", unit: "viên" };
+      const mockProduct = {
+        _id: new mongoose.Types.ObjectId(),
+        name: "Test",
+        unit: "viên",
+      };
 
       Product.find = jest.fn().mockReturnValue({
         select: jest.fn().mockReturnValue({
@@ -1255,9 +1280,9 @@ describe("Report Controller - getStatusDistribution", () => {
     test("should accept valid date range", async () => {
       req.query = { startDate: "2024-01-01", endDate: "2024-12-31" };
 
-      Transaction.aggregate = jest.fn().mockResolvedValue([
-        { status: "COMPLETED", count: 10 },
-      ]);
+      Transaction.aggregate = jest
+        .fn()
+        .mockResolvedValue([{ status: "COMPLETED", count: 10 }]);
 
       await getStatusDistribution(req, res);
 
@@ -1267,9 +1292,9 @@ describe("Report Controller - getStatusDistribution", () => {
     test("should work without date parameters", async () => {
       req.query = {};
 
-      Transaction.aggregate = jest.fn().mockResolvedValue([
-        { status: "COMPLETED", count: 10 },
-      ]);
+      Transaction.aggregate = jest
+        .fn()
+        .mockResolvedValue([{ status: "COMPLETED", count: 10 }]);
 
       await getStatusDistribution(req, res);
 
@@ -1279,9 +1304,9 @@ describe("Report Controller - getStatusDistribution", () => {
     test("should work with only startDate", async () => {
       req.query = { startDate: "2024-01-01" };
 
-      Transaction.aggregate = jest.fn().mockResolvedValue([
-        { status: "COMPLETED", count: 10 },
-      ]);
+      Transaction.aggregate = jest
+        .fn()
+        .mockResolvedValue([{ status: "COMPLETED", count: 10 }]);
 
       await getStatusDistribution(req, res);
 
@@ -1291,9 +1316,9 @@ describe("Report Controller - getStatusDistribution", () => {
     test("should work with only endDate", async () => {
       req.query = { endDate: "2024-12-31" };
 
-      Transaction.aggregate = jest.fn().mockResolvedValue([
-        { status: "COMPLETED", count: 10 },
-      ]);
+      Transaction.aggregate = jest
+        .fn()
+        .mockResolvedValue([{ status: "COMPLETED", count: 10 }]);
 
       await getStatusDistribution(req, res);
 
@@ -1433,9 +1458,9 @@ describe("Report Controller - getStatusDistribution", () => {
     test("should apply date range filter correctly", async () => {
       req.query = { startDate: "2024-01-01", endDate: "2024-01-31" };
 
-      Transaction.aggregate = jest.fn().mockResolvedValue([
-        { status: "COMPLETED", count: 10 },
-      ]);
+      Transaction.aggregate = jest
+        .fn()
+        .mockResolvedValue([{ status: "COMPLETED", count: 10 }]);
 
       await getStatusDistribution(req, res);
 
@@ -1688,9 +1713,9 @@ describe("Report Controller - exportReport", () => {
       };
 
       // Mock aggregate success
-      Transaction.aggregate = jest.fn().mockResolvedValue([
-        { status: "COMPLETED", count: 10 },
-      ]);
+      Transaction.aggregate = jest
+        .fn()
+        .mockResolvedValue([{ status: "COMPLETED", count: 10 }]);
 
       await exportReport(req, res);
 
@@ -1723,8 +1748,8 @@ describe("Report Controller - exportReport", () => {
       // Mock 4 aggregate calls: opening inbound, opening outbound, period inbound, period outbound
       TransactionDetail.aggregate = jest
         .fn()
-        .mockResolvedValueOnce([{ totalQuantity: 50 }])  // opening stock inbound
-        .mockResolvedValueOnce([])                        // opening stock outbound
+        .mockResolvedValueOnce([{ totalQuantity: 50 }]) // opening stock inbound
+        .mockResolvedValueOnce([]) // opening stock outbound
         .mockResolvedValueOnce([{ totalQuantity: 100 }]) // period inbound
         .mockResolvedValueOnce([{ totalQuantity: 30 }]); // period outbound
 
@@ -1750,16 +1775,16 @@ describe("Report Controller - exportReport", () => {
 
       // Giả lập file font tồn tại
       mockExistsSync.mockReturnValue(true);
-      
+
       // Mock status_distribution data fetch
-      Transaction.aggregate = jest.fn().mockResolvedValue([
-        { status: "COMPLETED", count: 10 },
-      ]);
+      Transaction.aggregate = jest
+        .fn()
+        .mockResolvedValue([{ status: "COMPLETED", count: 10 }]);
 
       await exportReport(req, res);
 
       expect(mockDoc.registerFont).toHaveBeenCalledWith(
-        "Roboto",
+        "Roboto-Regular",
         expect.stringContaining("Roboto-Regular.ttf")
       );
       expect(mockDoc.registerFont).toHaveBeenCalledWith(
@@ -1776,11 +1801,11 @@ describe("Report Controller - exportReport", () => {
 
       // Giả lập file font KHÔNG tồn tại
       mockExistsSync.mockReturnValue(false);
-      
+
       // Mock status_distribution data fetch
-      Transaction.aggregate = jest.fn().mockResolvedValue([
-        { status: "COMPLETED", count: 10 },
-      ]);
+      Transaction.aggregate = jest
+        .fn()
+        .mockResolvedValue([{ status: "COMPLETED", count: 10 }]);
 
       const consoleSpy = jest.spyOn(console, "warn").mockImplementation();
 
@@ -1863,7 +1888,9 @@ describe("Report Controller - exportReport", () => {
       );
       expect(res.setHeader).toHaveBeenCalledWith(
         "Content-Disposition",
-        expect.stringContaining("attachment; filename=report_status_distribution_")
+        expect.stringContaining(
+          "attachment; filename=report_status_distribution_"
+        )
       );
       expect(mockDoc.end).toHaveBeenCalled();
     });
@@ -1874,9 +1901,9 @@ describe("Report Controller - exportReport", () => {
         reportType: "status_distribution",
       };
 
-      Transaction.aggregate = jest.fn().mockResolvedValue([
-        { status: "COMPLETED", count: 10 },
-      ]);
+      Transaction.aggregate = jest
+        .fn()
+        .mockResolvedValue([{ status: "COMPLETED", count: 10 }]);
 
       await exportReport(req, res);
 
@@ -1892,9 +1919,9 @@ describe("Report Controller - exportReport", () => {
       };
 
       // Mock status_distribution data fetch
-      Transaction.aggregate = jest.fn().mockResolvedValue([
-        { status: "COMPLETED", count: 10 },
-      ]);
+      Transaction.aggregate = jest
+        .fn()
+        .mockResolvedValue([{ status: "COMPLETED", count: 10 }]);
 
       await exportReport(req, res);
 
@@ -1912,9 +1939,9 @@ describe("Report Controller - exportReport", () => {
       };
 
       // Mock status_distribution data fetch
-      Transaction.aggregate = jest.fn().mockResolvedValue([
-        { status: "COMPLETED", count: 10 },
-      ]);
+      Transaction.aggregate = jest
+        .fn()
+        .mockResolvedValue([{ status: "COMPLETED", count: 10 }]);
 
       await exportReport(req, res);
 
@@ -1931,9 +1958,9 @@ describe("Report Controller - exportReport", () => {
       };
 
       // Mock status_distribution data fetch
-      Transaction.aggregate = jest.fn().mockResolvedValue([
-        { status: "COMPLETED", count: 10 },
-      ]);
+      Transaction.aggregate = jest
+        .fn()
+        .mockResolvedValue([{ status: "COMPLETED", count: 10 }]);
 
       await exportReport(req, res);
 
@@ -2017,9 +2044,9 @@ describe("Report Controller - exportReport", () => {
         reportType: "status_distribution",
       };
 
-      Transaction.aggregate = jest.fn().mockResolvedValue([
-        { status: "COMPLETED", count: 10 },
-      ]);
+      Transaction.aggregate = jest
+        .fn()
+        .mockResolvedValue([{ status: "COMPLETED", count: 10 }]);
 
       await exportReport(req, res);
 
@@ -2059,9 +2086,9 @@ describe("Report Controller - exportReport", () => {
       };
 
       // Mock status_distribution data fetch
-      Transaction.aggregate = jest.fn().mockResolvedValue([
-        { status: "COMPLETED", count: 10 },
-      ]);
+      Transaction.aggregate = jest
+        .fn()
+        .mockResolvedValue([{ status: "COMPLETED", count: 10 }]);
 
       await exportReport(req, res);
 
@@ -2076,9 +2103,9 @@ describe("Report Controller - exportReport", () => {
       };
 
       // Mock status_distribution data fetch
-      Transaction.aggregate = jest.fn().mockResolvedValue([
-        { status: "COMPLETED", count: 10 },
-      ]);
+      Transaction.aggregate = jest
+        .fn()
+        .mockResolvedValue([{ status: "COMPLETED", count: 10 }]);
 
       await exportReport(req, res);
 
@@ -2092,9 +2119,9 @@ describe("Report Controller - exportReport", () => {
       };
 
       // Mock status_distribution data fetch
-      Transaction.aggregate = jest.fn().mockResolvedValue([
-        { status: "COMPLETED", count: 10 },
-      ]);
+      Transaction.aggregate = jest
+        .fn()
+        .mockResolvedValue([{ status: "COMPLETED", count: 10 }]);
 
       await exportReport(req, res);
 
@@ -2132,7 +2159,9 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
     test("should return 400 if type is invalid", async () => {
       req.query = { type: "invalid" };
 
-      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      const { exportReportFile } = await import(
+        "../../controllers/report.controller.js"
+      );
       await exportReportFile(req, res);
 
       expect(ApiResponse.badRequest).toHaveBeenCalledWith(
@@ -2142,9 +2171,15 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
     });
 
     test("should return 400 if startDate format is invalid", async () => {
-      req.query = { type: "excel", startDate: "2024/01/01", endDate: "2024-12-31" };
+      req.query = {
+        type: "excel",
+        startDate: "2024/01/01",
+        endDate: "2024-12-31",
+      };
 
-      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      const { exportReportFile } = await import(
+        "../../controllers/report.controller.js"
+      );
       await exportReportFile(req, res);
 
       expect(ApiResponse.badRequest).toHaveBeenCalledWith(
@@ -2154,9 +2189,15 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
     });
 
     test("should return 400 if endDate format is invalid", async () => {
-      req.query = { type: "excel", startDate: "2024-01-01", endDate: "2024/12/31" };
+      req.query = {
+        type: "excel",
+        startDate: "2024-01-01",
+        endDate: "2024/12/31",
+      };
 
-      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      const { exportReportFile } = await import(
+        "../../controllers/report.controller.js"
+      );
       await exportReportFile(req, res);
 
       expect(ApiResponse.badRequest).toHaveBeenCalledWith(
@@ -2166,9 +2207,15 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
     });
 
     test("should return 400 if startDate is after endDate", async () => {
-      req.query = { type: "excel", startDate: "2024-12-31", endDate: "2024-01-01" };
+      req.query = {
+        type: "excel",
+        startDate: "2024-12-31",
+        endDate: "2024-01-01",
+      };
 
-      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      const { exportReportFile } = await import(
+        "../../controllers/report.controller.js"
+      );
       await exportReportFile(req, res);
 
       expect(ApiResponse.badRequest).toHaveBeenCalledWith(
@@ -2178,15 +2225,23 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
     });
 
     test("should accept valid dates", async () => {
-      req.query = { type: "excel", startDate: "2024-01-01", endDate: "2024-12-31" };
+      req.query = {
+        type: "excel",
+        startDate: "2024-01-01",
+        endDate: "2024-12-31",
+      };
 
       // Mock database calls
       Product.find = jest.fn().mockReturnValue({
         select: jest.fn().mockReturnValue({
           lean: jest.fn().mockResolvedValue([
-            { _id: "507f1f77bcf86cd799439011", name: "Product 1", unit: "Viên" }
-          ])
-        })
+            {
+              _id: "507f1f77bcf86cd799439011",
+              name: "Product 1",
+              unit: "Viên",
+            },
+          ]),
+        }),
       });
 
       Product.findOne = jest.fn().mockReturnValue({
@@ -2194,17 +2249,19 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
           name: "Product 1",
           averageCost: 10000,
           minimumStock: 10,
-          reorderLevel: 50
-        })
+          reorderLevel: 50,
+        }),
       });
 
       TransactionDetail.aggregate = jest.fn().mockResolvedValue([]);
       Transaction.aggregate = jest.fn().mockResolvedValue([]);
       Transaction.find = jest.fn().mockReturnValue({
-        lean: jest.fn().mockResolvedValue([])
+        lean: jest.fn().mockResolvedValue([]),
       });
 
-      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      const { exportReportFile } = await import(
+        "../../controllers/report.controller.js"
+      );
       await exportReportFile(req, res);
 
       expect(res.setHeader).toHaveBeenCalledWith(
@@ -2220,10 +2277,18 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
       Product.find = jest.fn().mockReturnValue({
         select: jest.fn().mockReturnValue({
           lean: jest.fn().mockResolvedValue([
-            { _id: "507f1f77bcf86cd799439011", name: "Paracetamol", unit: "Viên" },
-            { _id: "507f1f77bcf86cd799439012", name: "Amoxicillin", unit: "Viên" }
-          ])
-        })
+            {
+              _id: "507f1f77bcf86cd799439011",
+              name: "Paracetamol",
+              unit: "Viên",
+            },
+            {
+              _id: "507f1f77bcf86cd799439012",
+              name: "Amoxicillin",
+              unit: "Viên",
+            },
+          ]),
+        }),
       });
 
       Product.findOne = jest.fn().mockReturnValue({
@@ -2231,13 +2296,13 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
           name: "Paracetamol",
           averageCost: 5000,
           minimumStock: 100,
-          reorderLevel: 200
-        })
+          reorderLevel: 200,
+        }),
       });
 
-      TransactionDetail.aggregate = jest.fn().mockResolvedValue([
-        { totalQuantity: 500 }
-      ]);
+      TransactionDetail.aggregate = jest
+        .fn()
+        .mockResolvedValue([{ totalQuantity: 500 }]);
 
       Transaction.aggregate = jest.fn().mockResolvedValue([
         {
@@ -2245,8 +2310,8 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
           month: 1,
           totalQuantity: 500,
           totalValue: 2500000,
-          transactionCount: 5
-        }
+          transactionCount: 5,
+        },
       ]);
 
       Transaction.find = jest.fn().mockReturnValue({
@@ -2255,16 +2320,18 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
             _id: "txn1",
             type: "INBOUND",
             createdAt: new Date("2024-01-15"),
-            status: "COMPLETED"
-          }
-        ])
+            status: "COMPLETED",
+          },
+        ]),
       });
     });
 
     test("should export Excel file with default type", async () => {
       req.query = { startDate: "2024-01-01", endDate: "2024-12-31" };
 
-      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      const { exportReportFile } = await import(
+        "../../controllers/report.controller.js"
+      );
       await exportReportFile(req, res);
 
       expect(res.setHeader).toHaveBeenCalledWith(
@@ -2282,9 +2349,15 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
     });
 
     test("should export Excel file when type=excel", async () => {
-      req.query = { type: "excel", startDate: "2024-01-01", endDate: "2024-12-31" };
+      req.query = {
+        type: "excel",
+        startDate: "2024-01-01",
+        endDate: "2024-12-31",
+      };
 
-      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      const { exportReportFile } = await import(
+        "../../controllers/report.controller.js"
+      );
       await exportReportFile(req, res);
 
       expect(res.setHeader).toHaveBeenCalledWith(
@@ -2296,7 +2369,9 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
     test("should work without date parameters", async () => {
       req.query = { type: "excel" };
 
-      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      const { exportReportFile } = await import(
+        "../../controllers/report.controller.js"
+      );
       await exportReportFile(req, res);
 
       expect(res.setHeader).toHaveBeenCalledWith(
@@ -2306,9 +2381,15 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
     });
 
     test("should set correct filename with current date", async () => {
-      req.query = { type: "excel", startDate: "2024-01-01", endDate: "2024-12-31" };
+      req.query = {
+        type: "excel",
+        startDate: "2024-01-01",
+        endDate: "2024-12-31",
+      };
 
-      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      const { exportReportFile } = await import(
+        "../../controllers/report.controller.js"
+      );
       await exportReportFile(req, res);
 
       const today = new Date().toISOString().split("T")[0];
@@ -2319,9 +2400,15 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
     });
 
     test("should call res.end() after writing Excel", async () => {
-      req.query = { type: "excel", startDate: "2024-01-01", endDate: "2024-12-31" };
+      req.query = {
+        type: "excel",
+        startDate: "2024-01-01",
+        endDate: "2024-12-31",
+      };
 
-      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      const { exportReportFile } = await import(
+        "../../controllers/report.controller.js"
+      );
       await exportReportFile(req, res);
 
       expect(res.end).toHaveBeenCalled();
@@ -2334,9 +2421,13 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
       Product.find = jest.fn().mockReturnValue({
         select: jest.fn().mockReturnValue({
           lean: jest.fn().mockResolvedValue([
-            { _id: "507f1f77bcf86cd799439011", name: "Paracetamol", unit: "Viên" }
-          ])
-        })
+            {
+              _id: "507f1f77bcf86cd799439011",
+              name: "Paracetamol",
+              unit: "Viên",
+            },
+          ]),
+        }),
       });
 
       Product.findOne = jest.fn().mockReturnValue({
@@ -2344,17 +2435,17 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
           name: "Paracetamol",
           averageCost: 5000,
           minimumStock: 100,
-          reorderLevel: 200
-        })
+          reorderLevel: 200,
+        }),
       });
 
-      TransactionDetail.aggregate = jest.fn().mockResolvedValue([
-        { totalQuantity: 500 }
-      ]);
+      TransactionDetail.aggregate = jest
+        .fn()
+        .mockResolvedValue([{ totalQuantity: 500 }]);
 
       Transaction.aggregate = jest.fn().mockResolvedValue([]);
       Transaction.find = jest.fn().mockReturnValue({
-        lean: jest.fn().mockResolvedValue([])
+        lean: jest.fn().mockResolvedValue([]),
       });
 
       // Mock fs.existsSync
@@ -2362,9 +2453,15 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
     });
 
     test("should export PDF file when type=pdf", async () => {
-      req.query = { type: "pdf", startDate: "2024-01-01", endDate: "2024-12-31" };
+      req.query = {
+        type: "pdf",
+        startDate: "2024-01-01",
+        endDate: "2024-12-31",
+      };
 
-      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      const { exportReportFile } = await import(
+        "../../controllers/report.controller.js"
+      );
       await exportReportFile(req, res);
 
       expect(res.setHeader).toHaveBeenCalledWith(
@@ -2378,29 +2475,47 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
     });
 
     test("should register fonts if font files exist", async () => {
-      req.query = { type: "pdf", startDate: "2024-01-01", endDate: "2024-12-31" };
+      req.query = {
+        type: "pdf",
+        startDate: "2024-01-01",
+        endDate: "2024-12-31",
+      };
       mockExistsSync.mockReturnValue(true);
 
-      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      const { exportReportFile } = await import(
+        "../../controllers/report.controller.js"
+      );
       await exportReportFile(req, res);
 
       expect(mockDoc.registerFont).toHaveBeenCalled();
     });
 
     test("should use default font if font files do not exist", async () => {
-      req.query = { type: "pdf", startDate: "2024-01-01", endDate: "2024-12-31" };
+      req.query = {
+        type: "pdf",
+        startDate: "2024-01-01",
+        endDate: "2024-12-31",
+      };
       mockExistsSync.mockReturnValue(false);
 
-      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      const { exportReportFile } = await import(
+        "../../controllers/report.controller.js"
+      );
       await exportReportFile(req, res);
 
       expect(mockDoc.font).toHaveBeenCalledWith("Helvetica-Bold");
     });
 
     test("should call doc.end() after PDF generation", async () => {
-      req.query = { type: "pdf", startDate: "2024-01-01", endDate: "2024-12-31" };
+      req.query = {
+        type: "pdf",
+        startDate: "2024-01-01",
+        endDate: "2024-12-31",
+      };
 
-      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      const { exportReportFile } = await import(
+        "../../controllers/report.controller.js"
+      );
       await exportReportFile(req, res);
 
       expect(mockDoc.end).toHaveBeenCalled();
@@ -2412,18 +2527,25 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
       Product.find = jest.fn().mockReturnValue({
         select: jest.fn().mockReturnValue({
           lean: jest.fn().mockResolvedValue([
-            { _id: "507f1f77bcf86cd799439011", name: "Product A", unit: "Viên" },
-            { _id: "507f1f77bcf86cd799439012", name: "Product B", unit: "Hộp" }
-          ])
-        })
+            {
+              _id: "507f1f77bcf86cd799439011",
+              name: "Product A",
+              unit: "Viên",
+            },
+            { _id: "507f1f77bcf86cd799439012", name: "Product B", unit: "Hộp" },
+          ]),
+        }),
       });
 
       TransactionDetail.aggregate = jest.fn().mockImplementation((pipeline) => {
-        const matchStage = pipeline.find(stage => stage.$match);
+        const matchStage = pipeline.find((stage) => stage.$match);
         if (matchStage && matchStage.$match["transaction.type"] === "INBOUND") {
           return Promise.resolve([{ totalQuantity: 1000 }]);
         }
-        if (matchStage && matchStage.$match["transaction.type"] === "OUTBOUND") {
+        if (
+          matchStage &&
+          matchStage.$match["transaction.type"] === "OUTBOUND"
+        ) {
           return Promise.resolve([{ totalQuantity: 300 }]);
         }
         return Promise.resolve([]);
@@ -2434,20 +2556,26 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
           name: "Product A",
           averageCost: 10000,
           minimumStock: 50,
-          reorderLevel: 100
-        })
+          reorderLevel: 100,
+        }),
       });
 
       Transaction.aggregate = jest.fn().mockResolvedValue([]);
       Transaction.find = jest.fn().mockReturnValue({
-        lean: jest.fn().mockResolvedValue([])
+        lean: jest.fn().mockResolvedValue([]),
       });
     });
 
     test("should calculate stock data correctly", async () => {
-      req.query = { type: "excel", startDate: "2024-01-01", endDate: "2024-12-31" };
+      req.query = {
+        type: "excel",
+        startDate: "2024-01-01",
+        endDate: "2024-12-31",
+      };
 
-      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      const { exportReportFile } = await import(
+        "../../controllers/report.controller.js"
+      );
       await exportReportFile(req, res);
 
       expect(Product.find).toHaveBeenCalled();
@@ -2455,27 +2583,39 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
     });
 
     test("should enhance products with value and status", async () => {
-      req.query = { type: "excel", startDate: "2024-01-01", endDate: "2024-12-31" };
+      req.query = {
+        type: "excel",
+        startDate: "2024-01-01",
+        endDate: "2024-12-31",
+      };
 
-      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      const { exportReportFile } = await import(
+        "../../controllers/report.controller.js"
+      );
       await exportReportFile(req, res);
 
       expect(Product.findOne).toHaveBeenCalled();
     });
 
     test("should determine status based on stock levels", async () => {
-      req.query = { type: "excel", startDate: "2024-01-01", endDate: "2024-12-31" };
+      req.query = {
+        type: "excel",
+        startDate: "2024-01-01",
+        endDate: "2024-12-31",
+      };
 
       Product.findOne = jest.fn().mockReturnValue({
         lean: jest.fn().mockResolvedValue({
           name: "Product A",
           averageCost: 5000,
           minimumStock: 100,
-          reorderLevel: 200
-        })
+          reorderLevel: 200,
+        }),
       });
 
-      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      const { exportReportFile } = await import(
+        "../../controllers/report.controller.js"
+      );
       await exportReportFile(req, res);
 
       expect(Product.findOne).toHaveBeenCalled();
@@ -2484,15 +2624,21 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
 
   describe("Error Handling", () => {
     test("should handle database errors gracefully", async () => {
-      req.query = { type: "excel", startDate: "2024-01-01", endDate: "2024-12-31" };
+      req.query = {
+        type: "excel",
+        startDate: "2024-01-01",
+        endDate: "2024-12-31",
+      };
 
       Product.find = jest.fn().mockReturnValue({
         select: jest.fn().mockReturnValue({
-          lean: jest.fn().mockRejectedValue(new Error("Database error"))
-        })
+          lean: jest.fn().mockRejectedValue(new Error("Database error")),
+        }),
       });
 
-      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      const { exportReportFile } = await import(
+        "../../controllers/report.controller.js"
+      );
       await exportReportFile(req, res);
 
       expect(ApiResponse.error).toHaveBeenCalledWith(
@@ -2504,30 +2650,40 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
     });
 
     test("should handle product not found", async () => {
-      req.query = { type: "excel", startDate: "2024-01-01", endDate: "2024-12-31" };
+      req.query = {
+        type: "excel",
+        startDate: "2024-01-01",
+        endDate: "2024-12-31",
+      };
 
       Product.find = jest.fn().mockReturnValue({
         select: jest.fn().mockReturnValue({
           lean: jest.fn().mockResolvedValue([
-            { _id: "507f1f77bcf86cd799439011", name: "Product A", unit: "Viên" }
-          ])
-        })
+            {
+              _id: "507f1f77bcf86cd799439011",
+              name: "Product A",
+              unit: "Viên",
+            },
+          ]),
+        }),
       });
 
       Product.findOne = jest.fn().mockReturnValue({
-        lean: jest.fn().mockResolvedValue(null)
+        lean: jest.fn().mockResolvedValue(null),
       });
 
-      TransactionDetail.aggregate = jest.fn().mockResolvedValue([
-        { totalQuantity: 100 }
-      ]);
+      TransactionDetail.aggregate = jest
+        .fn()
+        .mockResolvedValue([{ totalQuantity: 100 }]);
 
       Transaction.aggregate = jest.fn().mockResolvedValue([]);
       Transaction.find = jest.fn().mockReturnValue({
-        lean: jest.fn().mockResolvedValue([])
+        lean: jest.fn().mockResolvedValue([]),
       });
 
-      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      const { exportReportFile } = await import(
+        "../../controllers/report.controller.js"
+      );
       await exportReportFile(req, res);
 
       // Should not throw error, should use default values
@@ -2537,14 +2693,22 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
 
   describe("Integration Tests", () => {
     test("should generate complete Excel report with all sheets", async () => {
-      req.query = { type: "excel", startDate: "2024-01-01", endDate: "2024-12-31" };
+      req.query = {
+        type: "excel",
+        startDate: "2024-01-01",
+        endDate: "2024-12-31",
+      };
 
       Product.find = jest.fn().mockReturnValue({
         select: jest.fn().mockReturnValue({
           lean: jest.fn().mockResolvedValue([
-            { _id: "507f1f77bcf86cd799439011", name: "Paracetamol", unit: "Viên" }
-          ])
-        })
+            {
+              _id: "507f1f77bcf86cd799439011",
+              name: "Paracetamol",
+              unit: "Viên",
+            },
+          ]),
+        }),
       });
 
       Product.findOne = jest.fn().mockReturnValue({
@@ -2552,13 +2716,13 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
           name: "Paracetamol",
           averageCost: 5000,
           minimumStock: 100,
-          reorderLevel: 200
-        })
+          reorderLevel: 200,
+        }),
       });
 
-      TransactionDetail.aggregate = jest.fn().mockResolvedValue([
-        { totalQuantity: 1000 }
-      ]);
+      TransactionDetail.aggregate = jest
+        .fn()
+        .mockResolvedValue([{ totalQuantity: 1000 }]);
 
       Transaction.aggregate = jest.fn().mockResolvedValue([
         {
@@ -2566,8 +2730,8 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
           month: 1,
           totalQuantity: 500,
           totalValue: 2500000,
-          transactionCount: 5
-        }
+          transactionCount: 5,
+        },
       ]);
 
       Transaction.find = jest.fn().mockReturnValue({
@@ -2576,12 +2740,14 @@ describe("Report Controller - exportReportFile (Excel/PDF Export)", () => {
             _id: "txn1",
             type: "INBOUND",
             createdAt: new Date("2024-01-15"),
-            status: "COMPLETED"
-          }
-        ])
+            status: "COMPLETED",
+          },
+        ]),
       });
 
-      const { exportReportFile } = await import("../../controllers/report.controller.js");
+      const { exportReportFile } = await import(
+        "../../controllers/report.controller.js"
+      );
       await exportReportFile(req, res);
 
       expect(res.setHeader).toHaveBeenCalledWith(
