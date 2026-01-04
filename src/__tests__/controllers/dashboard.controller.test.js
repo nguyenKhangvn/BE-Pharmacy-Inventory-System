@@ -17,6 +17,7 @@ const mockTransaction = {
 
 const mockAlert = {
   find: jest.fn(),
+  countDocuments: jest.fn(),
 };
 
 // Mock module imports
@@ -67,18 +68,12 @@ describe("DashboardController.getDashboard", () => {
       mockProduct.countDocuments.mockResolvedValue(150);
 
       // Mock total stock value
-      mockInventoryLot.aggregate.mockResolvedValue([
-        { totalValue: 5000000 },
-      ]);
+      mockInventoryLot.aggregate.mockResolvedValue([{ totalValue: 5000000 }]);
 
-      // Mock expiring lots
-      mockInventoryLot.expiringSoon.mockResolvedValue([
-        { productId: "prod1", daysLeft: 15 },
-        { productId: "prod2", daysLeft: 20 },
-      ]);
-
-      // Mock low stock products
-      mockProduct.aggregate.mockResolvedValue([{ count: 10 }]);
+      // Mock expiring count from Alert
+      mockAlert.countDocuments
+        .mockResolvedValueOnce(2) // expiringCount
+        .mockResolvedValueOnce(10); // lowStockCount
 
       // Mock transactions for chart
       const today = new Date();
@@ -167,15 +162,23 @@ describe("DashboardController.getDashboard", () => {
       expect(mockProduct.countDocuments).toHaveBeenCalledWith({
         isActive: true,
       });
-      expect(mockInventoryLot.expiringSoon).toHaveBeenCalledWith(30);
+      expect(mockAlert.countDocuments).toHaveBeenCalledWith({
+        status: "ACTIVE",
+        alertType: { $in: ["EXPIRING_SOON", "EXPIRED"] },
+      });
+      expect(mockAlert.countDocuments).toHaveBeenCalledWith({
+        status: "ACTIVE",
+        alertType: { $in: ["LOW_STOCK", "OUT_OF_STOCK"] },
+      });
       expect(mockAlert.find).toHaveBeenCalledWith({ status: "ACTIVE" });
     });
 
     it("should handle zero values gracefully", async () => {
       mockProduct.countDocuments.mockResolvedValue(0);
       mockInventoryLot.aggregate.mockResolvedValue([]);
-      mockInventoryLot.expiringSoon.mockResolvedValue([]);
-      mockProduct.aggregate.mockResolvedValue([]);
+      mockAlert.countDocuments
+        .mockResolvedValueOnce(0) // expiringCount
+        .mockResolvedValueOnce(0); // lowStockCount
       mockTransaction.aggregate.mockResolvedValue([]);
       mockAlert.find.mockReturnValue({
         sort: jest.fn().mockReturnThis(),
@@ -206,8 +209,9 @@ describe("DashboardController.getDashboard", () => {
     it("should return 7 days of chart data", async () => {
       mockProduct.countDocuments.mockResolvedValue(10);
       mockInventoryLot.aggregate.mockResolvedValue([]);
-      mockInventoryLot.expiringSoon.mockResolvedValue([]);
-      mockProduct.aggregate.mockResolvedValue([]);
+      mockAlert.countDocuments
+        .mockResolvedValueOnce(0) // expiringCount
+        .mockResolvedValueOnce(0); // lowStockCount
       mockTransaction.aggregate.mockResolvedValue([]);
       mockAlert.find.mockReturnValue({
         sort: jest.fn().mockReturnThis(),
@@ -230,8 +234,9 @@ describe("DashboardController.getDashboard", () => {
     it("should limit alerts to 5 items", async () => {
       mockProduct.countDocuments.mockResolvedValue(10);
       mockInventoryLot.aggregate.mockResolvedValue([]);
-      mockInventoryLot.expiringSoon.mockResolvedValue([]);
-      mockProduct.aggregate.mockResolvedValue([]);
+      mockAlert.countDocuments
+        .mockResolvedValueOnce(0) // expiringCount
+        .mockResolvedValueOnce(0); // lowStockCount
       mockTransaction.aggregate.mockResolvedValue([]);
 
       const mockAlerts = Array.from({ length: 5 }, (_, i) => ({
@@ -270,17 +275,14 @@ describe("DashboardController.getDashboard", () => {
 
   describe("Error Handling", () => {
     it("should handle database errors gracefully", async () => {
-      mockProduct.countDocuments.mockRejectedValue(
-        new Error("Database error")
-      );
+      mockProduct.countDocuments.mockRejectedValue(new Error("Database error"));
 
       await getDashboard(req, res);
 
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        message:
-          "Lỗi server khi lấy dữ liệu dashboard. Vui lòng thử lại sau.",
+        message: "Lỗi server khi lấy dữ liệu dashboard.",
         errors: null,
       });
     });
@@ -288,8 +290,9 @@ describe("DashboardController.getDashboard", () => {
     it("should handle transaction aggregate error", async () => {
       mockProduct.countDocuments.mockResolvedValue(10);
       mockInventoryLot.aggregate.mockResolvedValue([]);
-      mockInventoryLot.expiringSoon.mockResolvedValue([]);
-      mockProduct.aggregate.mockResolvedValue([]);
+      mockAlert.countDocuments
+        .mockResolvedValueOnce(0) // expiringCount
+        .mockResolvedValueOnce(0); // lowStockCount
       mockTransaction.aggregate.mockRejectedValue(
         new Error("Transaction error")
       );
@@ -299,8 +302,7 @@ describe("DashboardController.getDashboard", () => {
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        message:
-          "Lỗi server khi lấy dữ liệu dashboard. Vui lòng thử lại sau.",
+        message: "Lỗi server khi lấy dữ liệu dashboard.",
         errors: null,
       });
     });
@@ -308,8 +310,9 @@ describe("DashboardController.getDashboard", () => {
     it("should handle alert fetch error", async () => {
       mockProduct.countDocuments.mockResolvedValue(10);
       mockInventoryLot.aggregate.mockResolvedValue([]);
-      mockInventoryLot.expiringSoon.mockResolvedValue([]);
-      mockProduct.aggregate.mockResolvedValue([]);
+      mockAlert.countDocuments
+        .mockResolvedValueOnce(0) // expiringCount
+        .mockResolvedValueOnce(0); // lowStockCount
       mockTransaction.aggregate.mockResolvedValue([]);
       mockAlert.find.mockReturnValue({
         sort: jest.fn().mockReturnThis(),
@@ -323,8 +326,7 @@ describe("DashboardController.getDashboard", () => {
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        message:
-          "Lỗi server khi lấy dữ liệu dashboard. Vui lòng thử lại sau.",
+        message: "Lỗi server khi lấy dữ liệu dashboard.",
         errors: null,
       });
     });
